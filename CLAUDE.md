@@ -6,18 +6,26 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **memoria** は Claude Code 向けのプロジェクト認識型ローカル RAG メモリシステム。コーディングセッションから意思決定・制約・失敗・TODO・知見を自動抽出し、SQLite にローカル蓄積する。
 
-現在は **仕様設計フェーズ**。Go / Python の実装コードはまだ存在しない。
+現在は **M01 CLI skeleton 完了**。Kong CLI 骨格が実装済み。
 
 ## ビルド・テスト・リント
 
-実装が進んだら以下のコマンドを追加予定：
-
 ```bash
-# Go ビルド（予定）
-go build ./...
+# ビルド（バージョン情報埋め込み）
+make build
 
-# テスト（予定）
+# テスト
+make test
+# または
 go test ./...
+
+# リント
+make lint
+# または
+go vet ./...
+
+# クリーン
+make clean
 
 # Python embedding worker（予定）
 uv run python/worker.py
