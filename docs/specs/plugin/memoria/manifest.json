@@ -1,0 +1,14 @@
+{
+  "name": "memoria",
+  "version": "0.1.0",
+  "description": "Project-aware memory system for Claude Code",
+  "hooks": {
+    "SessionStart": "memoria hook session-start",
+    "UserPromptSubmit": "memoria hook user-prompt",
+    "Stop": "memoria hook stop",
+    "SessionEnd": "memoria hook session-end"
+  },
+  "skills": [
+    "skills/memoria/SKILL.md"
+  ]
+}
