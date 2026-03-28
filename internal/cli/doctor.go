@@ -30,7 +30,30 @@ type DoctorResult struct {
 type DoctorCmd struct{}
 
 // Run は doctor コマンドを実行する。
-func (c *DoctorCmd) Run(globals *Globals, w *io.Writer, database *db.DB) error {
+func (c *DoctorCmd) Run(globals *Globals, w *io.Writer, lazyDB *LazyDB) error {
+	database, err := lazyDB.Get()
+	if err != nil {
+		// DB が開けない場合もチェック結果として返す
+		result := DoctorResult{OK: false}
+		result.Checks = append(result.Checks, DoctorCheck{
+			Name:   "db_connected",
+			OK:     false,
+			Detail: err.Error(),
+		})
+		switch globals.Format {
+		case "json":
+			enc := json.NewEncoder(*w)
+			enc.SetIndent("", "  ")
+			return enc.Encode(result)
+		default:
+			return printDoctorText(*w, result)
+		}
+	}
+	return c.runWithDB(globals, w, database)
+}
+
+// runWithDB は DB が利用可能な場合の doctor コマンド実装。
+func (c *DoctorCmd) runWithDB(globals *Globals, w *io.Writer, database *db.DB) error {
 	result := DoctorResult{OK: true}
 
 	// --- パス確認 ---

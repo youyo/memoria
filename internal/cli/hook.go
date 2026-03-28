@@ -10,7 +10,6 @@ import (
 	"time"
 
 	cfg_pkg "github.com/youyo/memoria/internal/config"
-	"github.com/youyo/memoria/internal/db"
 	"github.com/youyo/memoria/internal/embedding"
 	"github.com/youyo/memoria/internal/project"
 	"github.com/youyo/memoria/internal/queue"
@@ -61,7 +60,11 @@ type HookSessionStartInput struct {
 type HookSessionStartCmd struct{}
 
 // Run は session-start hook を実行する（os.Stdin から読み取る）。
-func (c *HookSessionStartCmd) Run(globals *Globals, w *io.Writer, database *db.DB) error {
+func (c *HookSessionStartCmd) Run(globals *Globals, w *io.Writer, lazyDB *LazyDB) error {
+	database, err := lazyDB.Get()
+	if err != nil {
+		return writeHookOutput(*w, "SessionStart", "")
+	}
 	return c.RunWithReader(globals, *w, os.Stdin, database.SQL(), nil)
 }
 
@@ -118,7 +121,11 @@ type HookUserPromptInput struct {
 type HookUserPromptCmd struct{}
 
 // Run は user-prompt hook を実行する（os.Stdin から読み取る）。
-func (c *HookUserPromptCmd) Run(globals *Globals, w *io.Writer, database *db.DB, cfg *cfg_pkg.Config) error {
+func (c *HookUserPromptCmd) Run(globals *Globals, w *io.Writer, lazyDB *LazyDB, cfg *cfg_pkg.Config) error {
+	database, err := lazyDB.Get()
+	if err != nil {
+		return writeHookOutput(*w, "UserPromptSubmit", "")
+	}
 	embedder := newEmbedderFromConfig(cfg)
 	return c.RunWithReader(globals, *w, os.Stdin, database.SQL(), embedder)
 }
@@ -201,7 +208,12 @@ type CheckpointPayload struct {
 type HookStopCmd struct{}
 
 // Run は stop hook を実行する（os.Stdin から読み取る）。
-func (c *HookStopCmd) Run(globals *Globals, w *io.Writer, database *db.DB, q *queue.Queue) error {
+func (c *HookStopCmd) Run(globals *Globals, w *io.Writer, lazyDB *LazyDB) error {
+	database, err := lazyDB.Get()
+	if err != nil {
+		return nil // DB エラー時は exit 0（hook は block しない）
+	}
+	q := queue.New(database.SQL())
 	return c.RunWithReader(globals, w, os.Stdin, database.SQL(), q)
 }
 
@@ -275,7 +287,12 @@ type SessionEndPayload struct {
 type HookSessionEndCmd struct{}
 
 // Run は session-end hook を実行する（os.Stdin から読み取る）。
-func (c *HookSessionEndCmd) Run(globals *Globals, w *io.Writer, database *db.DB, q *queue.Queue) error {
+func (c *HookSessionEndCmd) Run(globals *Globals, w *io.Writer, lazyDB *LazyDB) error {
+	database, err := lazyDB.Get()
+	if err != nil {
+		return nil // DB エラー時は exit 0（hook は block しない）
+	}
+	q := queue.New(database.SQL())
 	return c.RunWithReader(globals, w, os.Stdin, database.SQL(), q)
 }
 

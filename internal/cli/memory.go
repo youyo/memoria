@@ -8,7 +8,6 @@ import (
 	"io"
 	"os"
 
-	"github.com/youyo/memoria/internal/db"
 	"github.com/youyo/memoria/internal/retrieval"
 )
 
@@ -30,7 +29,11 @@ type MemorySearchCmd struct {
 }
 
 // Run は memory search を実行する。
-func (c *MemorySearchCmd) Run(globals *Globals, w *io.Writer, database *db.DB) error {
+func (c *MemorySearchCmd) Run(globals *Globals, w *io.Writer, lazyDB *LazyDB) error {
+	database, err := lazyDB.Get()
+	if err != nil {
+		return fmt.Errorf("db open: %w", err)
+	}
 	ctx := context.Background()
 
 	ret := retrieval.New(database.SQL(), nil) // embedder nil = FTS only
@@ -110,7 +113,11 @@ type MemoryGetCmd struct {
 }
 
 // Run は memory get を実行する。
-func (c *MemoryGetCmd) Run(globals *Globals, w *io.Writer, database *db.DB) error {
+func (c *MemoryGetCmd) Run(globals *Globals, w *io.Writer, lazyDB *LazyDB) error {
+	database, err := lazyDB.Get()
+	if err != nil {
+		return fmt.Errorf("db open: %w", err)
+	}
 	ctx := context.Background()
 
 	const query = `
@@ -119,7 +126,7 @@ FROM chunks
 WHERE chunk_id = ?`
 
 	var chunk ChunkDetail
-	err := database.SQL().QueryRowContext(ctx, query, c.ID).Scan(
+	err = database.SQL().QueryRowContext(ctx, query, c.ID).Scan(
 		&chunk.ChunkID,
 		&chunk.ProjectID,
 		&chunk.Content,
@@ -170,7 +177,11 @@ type MemoryListCmd struct {
 }
 
 // Run は memory list を実行する。
-func (c *MemoryListCmd) Run(globals *Globals, w *io.Writer, database *db.DB) error {
+func (c *MemoryListCmd) Run(globals *Globals, w *io.Writer, lazyDB *LazyDB) error {
+	database, err := lazyDB.Get()
+	if err != nil {
+		return fmt.Errorf("db open: %w", err)
+	}
 	ctx := context.Background()
 
 	query := `SELECT chunk_id, project_id, content, COALESCE(summary,''), kind, importance, scope, created_at FROM chunks`
@@ -265,7 +276,11 @@ type MemoryStatsOutput struct {
 type MemoryStatsCmd struct{}
 
 // Run は memory stats を実行する。
-func (c *MemoryStatsCmd) Run(globals *Globals, w *io.Writer, database *db.DB) error {
+func (c *MemoryStatsCmd) Run(globals *Globals, w *io.Writer, lazyDB *LazyDB) error {
+	database, err := lazyDB.Get()
+	if err != nil {
+		return fmt.Errorf("db open: %w", err)
+	}
 	ctx := context.Background()
 	sqlDB := database.SQL()
 	dbPath := database.Path()
@@ -316,7 +331,11 @@ type MemoryReindexCmd struct {
 }
 
 // Run は memory reindex を実行する。
-func (c *MemoryReindexCmd) Run(globals *Globals, w *io.Writer, database *db.DB) error {
+func (c *MemoryReindexCmd) Run(globals *Globals, w *io.Writer, lazyDB *LazyDB) error {
+	database, err := lazyDB.Get()
+	if err != nil {
+		return fmt.Errorf("db open: %w", err)
+	}
 	ctx := context.Background()
 	sqlDB := database.SQL()
 

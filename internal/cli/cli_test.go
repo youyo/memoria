@@ -10,7 +10,6 @@ import (
 	"github.com/alecthomas/kong"
 	"github.com/youyo/memoria/internal/config"
 	"github.com/youyo/memoria/internal/db"
-	"github.com/youyo/memoria/internal/queue"
 )
 
 // parseForTest は Kong パーサーをテスト用に構成し、stdout をキャプチャして返す。
@@ -35,6 +34,14 @@ func parseForTestWithDB(t *testing.T, args []string, database *db.DB) (stdout st
 	w := io.Writer(&buf)
 	cfg := config.DefaultConfig()
 
+	// LazyDB を構築: DB が注入されている場合はそのまま使う、なければ未開放の LazyDB
+	var lazyDB *LazyDB
+	if database != nil {
+		lazyDB = NewLazyDBFromDB(database)
+	} else {
+		lazyDB = NewLazyDB("") // DB 不要なコマンド用（Get() が呼ばれてもエラーを返すだけ）
+	}
+
 	bindOpts := []kong.Option{
 		kong.Name("memoria"),
 		kong.Description("Claude Code 向けプロジェクト認識型ローカル RAG メモリシステム"),
@@ -42,15 +49,10 @@ func parseForTestWithDB(t *testing.T, args []string, database *db.DB) (stdout st
 		kong.Bind(info),
 		kong.Bind(&w),
 		kong.Bind(cfg),
+		kong.Bind(lazyDB),
 		kong.Exit(func(code int) {
 			// テスト中は os.Exit しない
 		}),
-	}
-	if database != nil {
-		bindOpts = append(bindOpts, kong.Bind(database))
-		// queue.Queue も DB がある場合に DI する
-		q := queue.New(database.SQL())
-		bindOpts = append(bindOpts, kong.Bind(q))
 	}
 
 	parser, newErr := kong.New(&c, bindOpts...)
