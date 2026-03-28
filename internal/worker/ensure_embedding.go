@@ -78,8 +78,11 @@ func buildEmbeddingWorkerArgs(cfg *config.Config, sockPath, workerScript string)
 	if model == "" {
 		model = "cl-nagoya/ruri-v3-30m"
 	}
+	// uv run --project <python/ディレクトリ> で pyproject.toml を指定し、
+	// venv 内の依存パッケージが使えるようにする。
+	projectDir := filepath.Dir(workerScript)
 	return []string{
-		"run", "python", workerScript,
+		"run", "--project", projectDir, "python", workerScript,
 		"--uds", sockPath,
 		"--model", model,
 		"--preload",
