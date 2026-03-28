@@ -87,6 +87,61 @@ func buildEmbeddingWorkerArgs(cfg *config.Config, sockPath, workerScript string)
 	}
 }
 
+// findWorkerScript は python/worker.py のパスを以下の順序で探索する:
+// 1. os.Args[0] の隣（make install 等でインストールされた場合）
+// 2. os.Executable() の実パスの隣（シンボリックリンク経由の場合）
+// 3. カレントディレクトリ（開発時）
+func findWorkerScript() (string, error) {
+	candidates := []string{
+		filepath.Join(filepath.Dir(os.Args[0]), "python", "worker.py"),
+	}
+
+	if execPath, err := os.Executable(); err == nil {
+		if realPath, err := filepath.EvalSymlinks(execPath); err == nil {
+			candidates = append(candidates, filepath.Join(filepath.Dir(realPath), "python", "worker.py"))
+		}
+	}
+
+	if cwd, err := os.Getwd(); err == nil {
+		candidates = append(candidates, filepath.Join(cwd, "python", "worker.py"))
+	}
+
+	// 重複を除きながら存在確認
+	seen := make(map[string]bool)
+	tried := make([]string, 0, len(candidates))
+	for _, p := range candidates {
+		abs, err := filepath.Abs(p)
+		if err != nil {
+			abs = p
+		}
+		if seen[abs] {
+			continue
+		}
+		seen[abs] = true
+		tried = append(tried, abs)
+		if _, err := os.Stat(abs); err == nil {
+			return abs, nil
+		}
+	}
+
+	return "", fmt.Errorf(
+		"embedding worker script (python/worker.py) not found; searched:\n  %s\nplace python/worker.py next to the memoria binary",
+		joinLines(tried),
+	)
+}
+
+// joinLines は文字列スライスを改行+インデントで結合する。
+func joinLines(ss []string) string {
+	result := ""
+	for i, s := range ss {
+		if i > 0 {
+			result += "\n  "
+		}
+		result += s
+	}
+	return result
+}
+
 // spawnEmbeddingWorker は embedding worker を uv run で spawn する。
 func spawnEmbeddingWorker(cfg *config.Config) error {
 	uvPath, err := exec.LookPath("uv")
@@ -94,11 +149,13 @@ func spawnEmbeddingWorker(cfg *config.Config) error {
 		return fmt.Errorf("uv not found: install uv to enable embedding (https://docs.astral.sh/uv/)")
 	}
 
-	// os.Args[0] の隣にある python/worker.py を探す
-	execDir := filepath.Dir(os.Args[0])
-	workerScript := filepath.Join(execDir, "python", "worker.py")
-	if _, err := os.Stat(workerScript); err != nil {
-		return fmt.Errorf("embedding worker script not found at %q: place python/worker.py next to the memoria binary", workerScript)
+	// python/worker.py を以下の順序で探索する:
+	// 1. os.Args[0] の隣（make install 等でインストールされた場合）
+	// 2. os.Executable() の実パスの隣（シンボリックリンク経由の場合）
+	// 3. カレントディレクトリ（開発時: make build + ./bin/memoria）
+	workerScript, err := findWorkerScript()
+	if err != nil {
+		return err
 	}
 
 	sockPath := config.SocketPath()
