@@ -2,7 +2,9 @@ package worker_test
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"testing"
@@ -188,6 +190,71 @@ func TestHandleSessionEndEmptyTranscript(t *testing.T) {
 	}
 	if count != 0 {
 		t.Errorf("expected 0 chunks for empty transcript, got %d", count)
+	}
+}
+
+func TestHandleSessionEndWithEmbedder(t *testing.T) {
+	db := testutil.OpenTestDB(t)
+	insertTestProject(t, db, "p1")
+	ctx := context.Background()
+
+	// session_end で chunks が生成されたら EmbedChunks が呼ばれること
+	mock := &mockEmbedder{}
+	handler := worker.NewSessionEndHandlerWithEmbedder(db, mock, "test-model", nil)
+
+	transcriptPath := writeTempTranscriptW(t, makeTranscriptJSONL(2))
+	payloadJSON := makeSessionEndPayload(t, "s-emb-1", "p1", transcriptPath)
+	job := &queue.Job{
+		ID:          "job-se-emb-1",
+		Type:        queue.JobTypeSessionEndIngest,
+		PayloadJSON: payloadJSON,
+	}
+
+	if err := handler.Handle(ctx, job); err != nil {
+		t.Fatalf("Handle: %v", err)
+	}
+
+	if !mock.called {
+		t.Error("expected EmbedChunks to be called after session_end ingest")
+	}
+	if len(mock.lastChunkIDs) == 0 {
+		t.Error("expected at least 1 chunkID passed to EmbedChunks")
+	}
+}
+
+func TestHandleSessionEndWithEmbedderError(t *testing.T) {
+	db := testutil.OpenTestDB(t)
+	insertTestProject(t, db, "p1")
+	ctx := context.Background()
+
+	// embedding エラー → ingest は成功（エラーを返さない）
+	mock := &mockEmbedder{}
+	mock.embedChunksFn = func(_ context.Context, _ *sql.DB, _ []string, _ string) error {
+		return errors.New("embedding error")
+	}
+	handler := worker.NewSessionEndHandlerWithEmbedder(db, mock, "test-model", nil)
+
+	transcriptPath := writeTempTranscriptW(t, makeTranscriptJSONL(1))
+	payloadJSON := makeSessionEndPayload(t, "s-emb-err-1", "p1", transcriptPath)
+	job := &queue.Job{
+		ID:          "job-se-emb-err-1",
+		Type:        queue.JobTypeSessionEndIngest,
+		PayloadJSON: payloadJSON,
+	}
+
+	// embedding エラーがあっても Handle は nil を返す（non-fatal）
+	if err := handler.Handle(ctx, job); err != nil {
+		t.Fatalf("Handle should not return error on embedding failure: %v", err)
+	}
+
+	// chunks は保存されていること
+	var count int
+	row := db.QueryRowContext(ctx, "SELECT COUNT(*) FROM chunks WHERE session_id = 's-emb-err-1'")
+	if err := row.Scan(&count); err != nil {
+		t.Fatalf("count chunks: %v", err)
+	}
+	if count == 0 {
+		t.Error("expected chunks to be saved even when embedding fails")
 	}
 }
 

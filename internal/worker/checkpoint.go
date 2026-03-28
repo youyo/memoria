@@ -25,12 +25,31 @@ type checkpointPayload struct {
 
 // CheckpointHandler は checkpoint_ingest ジョブを処理するハンドラ。
 type CheckpointHandler struct {
-	db *sql.DB
+	db       *sql.DB
+	embedder ingest.Embedder // nil の場合は embedding スキップ
+	model    string
+	logf     func(string, ...any)
 }
 
-// NewCheckpointHandler は CheckpointHandler を生成する。
+// NewCheckpointHandler は embedding なし（後方互換）の CheckpointHandler を生成する。
 func NewCheckpointHandler(db *sql.DB) *CheckpointHandler {
-	return &CheckpointHandler{db: db}
+	return &CheckpointHandler{
+		db:   db,
+		logf: func(string, ...any) {},
+	}
+}
+
+// NewCheckpointHandlerWithEmbedder は embedding 付きの CheckpointHandler を生成する。
+func NewCheckpointHandlerWithEmbedder(db *sql.DB, embedder ingest.Embedder, model string, logf func(string, ...any)) *CheckpointHandler {
+	if logf == nil {
+		logf = func(string, ...any) {}
+	}
+	return &CheckpointHandler{
+		db:       db,
+		embedder: embedder,
+		model:    model,
+		logf:     logf,
+	}
 }
 
 // Handle は checkpoint_ingest ジョブを処理する。
@@ -71,6 +90,8 @@ func (h *CheckpointHandler) Handle(ctx context.Context, job *queue.Job) error {
 	// 3. content を chunk 化（長文の場合は分割）
 	contentParts := ingest.SplitLongContent(payload.Content)
 
+	var insertedChunkIDs []string
+
 	for _, part := range contentParts {
 		if strings.TrimSpace(part) == "" {
 			continue
@@ -97,6 +118,15 @@ func (h *CheckpointHandler) Handle(ctx context.Context, job *queue.Job) error {
 			ContentHash:  contentHash,
 		}); err != nil {
 			return fmt.Errorf("insert chunk: %w", err)
+		}
+		insertedChunkIDs = append(insertedChunkIDs, chunkID)
+	}
+
+	// 7. embedding（embedder が設定されている場合のみ）
+	if h.embedder != nil && len(insertedChunkIDs) > 0 {
+		if err := h.embedder.EmbedChunks(ctx, h.db, insertedChunkIDs, h.model); err != nil {
+			// embedding 失敗は非致命的: ingest は成功扱い（warn ログのみ）
+			h.logf("memoria: checkpoint embedding skipped: %v\n", err)
 		}
 	}
 

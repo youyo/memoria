@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"testing"
 	"time"
 
@@ -12,6 +13,22 @@ import (
 	"github.com/youyo/memoria/internal/testutil"
 	"github.com/youyo/memoria/internal/worker"
 )
+
+// mockEmbedder は ingest.Embedder のテスト用モック。
+type mockEmbedder struct {
+	embedChunksFn func(ctx context.Context, db *sql.DB, chunkIDs []string, modelName string) error
+	called        bool
+	lastChunkIDs  []string
+}
+
+func (m *mockEmbedder) EmbedChunks(ctx context.Context, db *sql.DB, chunkIDs []string, modelName string) error {
+	m.called = true
+	m.lastChunkIDs = chunkIDs
+	if m.embedChunksFn != nil {
+		return m.embedChunksFn(ctx, db, chunkIDs, modelName)
+	}
+	return nil
+}
 
 // checkpointPayloadTest はテスト用の checkpoint payload 構造体。
 type checkpointPayloadTest struct {
@@ -183,6 +200,111 @@ func TestHandleCheckpointSessionCreated(t *testing.T) {
 	}
 	if sessionID != "s-session-test" {
 		t.Errorf("expected session_id=s-session-test, got %s", sessionID)
+	}
+}
+
+func TestHandleCheckpointWithEmbedder(t *testing.T) {
+	db := testutil.OpenTestDB(t)
+	insertTestProject(t, db, "p1")
+	ctx := context.Background()
+
+	mock := &mockEmbedder{}
+	handler := worker.NewCheckpointHandlerWithEmbedder(db, mock, "test-model", nil)
+
+	payloadJSON := makeCheckpointPayload(t, "s1", "p1", "We decided to use Go for the backend")
+	job := &queue.Job{
+		ID:          "job-emb-1",
+		Type:        queue.JobTypeCheckpointIngest,
+		PayloadJSON: payloadJSON,
+	}
+
+	if err := handler.Handle(ctx, job); err != nil {
+		t.Fatalf("Handle: %v", err)
+	}
+
+	// EmbedChunks が呼ばれたこと
+	if !mock.called {
+		t.Error("expected EmbedChunks to be called")
+	}
+	if len(mock.lastChunkIDs) == 0 {
+		t.Error("expected at least 1 chunkID passed to EmbedChunks")
+	}
+}
+
+func TestHandleCheckpointWithEmbedderError(t *testing.T) {
+	db := testutil.OpenTestDB(t)
+	insertTestProject(t, db, "p1")
+	ctx := context.Background()
+
+	// embedding エラー → ingest は成功（エラーを返さない）
+	mock := &mockEmbedder{
+		embedChunksFn: func(ctx context.Context, db *sql.DB, chunkIDs []string, modelName string) error {
+			return errors.New("embedding worker not available")
+		},
+	}
+	handler := worker.NewCheckpointHandlerWithEmbedder(db, mock, "test-model", nil)
+
+	payloadJSON := makeCheckpointPayload(t, "s1", "p1", "content to ingest")
+	job := &queue.Job{
+		ID:          "job-emb-err-1",
+		Type:        queue.JobTypeCheckpointIngest,
+		PayloadJSON: payloadJSON,
+	}
+
+	// embedding エラーがあっても Handle は nil を返す（non-fatal）
+	if err := handler.Handle(ctx, job); err != nil {
+		t.Fatalf("Handle should not return error on embedding failure: %v", err)
+	}
+
+	// chunks テーブルには保存されていること
+	var count int
+	row := db.QueryRowContext(ctx, "SELECT COUNT(*) FROM chunks")
+	if err := row.Scan(&count); err != nil {
+		t.Fatalf("count chunks: %v", err)
+	}
+	if count == 0 {
+		t.Error("expected chunk to be saved even when embedding fails")
+	}
+}
+
+func TestHandleCheckpointWithoutEmbedder(t *testing.T) {
+	db := testutil.OpenTestDB(t)
+	insertTestProject(t, db, "p1")
+	ctx := context.Background()
+
+	// embedder なし（デフォルトコンストラクタ）
+	handler := worker.NewCheckpointHandler(db)
+
+	payloadJSON := makeCheckpointPayload(t, "s1", "p1", "content without embedding")
+	job := &queue.Job{
+		ID:          "job-no-emb-1",
+		Type:        queue.JobTypeCheckpointIngest,
+		PayloadJSON: payloadJSON,
+	}
+
+	// embedder なしでも正常動作
+	if err := handler.Handle(ctx, job); err != nil {
+		t.Fatalf("Handle without embedder: %v", err)
+	}
+
+	// chunks に保存されていること
+	var count int
+	row := db.QueryRowContext(ctx, "SELECT COUNT(*) FROM chunks")
+	if err := row.Scan(&count); err != nil {
+		t.Fatalf("count chunks: %v", err)
+	}
+	if count == 0 {
+		t.Error("expected chunk to be saved without embedder")
+	}
+
+	// chunk_embeddings には何もないこと
+	var embCount int
+	row = db.QueryRowContext(ctx, "SELECT COUNT(*) FROM chunk_embeddings")
+	if err := row.Scan(&embCount); err != nil {
+		t.Fatalf("count chunk_embeddings: %v", err)
+	}
+	if embCount != 0 {
+		t.Errorf("expected 0 chunk_embeddings without embedder, got %d", embCount)
 	}
 }
 

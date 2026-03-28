@@ -4,6 +4,9 @@ import (
 	"context"
 	"database/sql"
 
+	"github.com/youyo/memoria/internal/config"
+	"github.com/youyo/memoria/internal/embedding"
+	"github.com/youyo/memoria/internal/ingest"
 	"github.com/youyo/memoria/internal/queue"
 )
 
@@ -20,11 +23,30 @@ type DefaultJobProcessor struct {
 	sessionEnd *SessionEndHandler
 }
 
-// NewDefaultJobProcessor は DefaultJobProcessor を生成する。
+// NewDefaultJobProcessor は embedding なし（後方互換）の DefaultJobProcessor を生成する。
+// テストやシンプルな用途向け。embedding が必要な場合は NewDefaultJobProcessorWithEmbedding を使う。
 func NewDefaultJobProcessor(db *sql.DB) *DefaultJobProcessor {
 	return &DefaultJobProcessor{
 		checkpoint: NewCheckpointHandler(db),
 		sessionEnd: NewSessionEndHandler(db),
+	}
+}
+
+// NewDefaultJobProcessorWithEmbedding は embedding 付きの DefaultJobProcessor を生成する。
+// embedding worker が UDS 経由で稼働していることを期待する。
+// worker が未起動の場合、EmbedChunks がエラーを返すが ingest 自体は成功扱い（warn ログのみ）。
+func NewDefaultJobProcessorWithEmbedding(db *sql.DB, cfg *config.Config, logf func(string, ...any)) *DefaultJobProcessor {
+	model := cfg.Embedding.Model
+	if model == "" {
+		model = "cl-nagoya/ruri-v3-30m"
+	}
+
+	embeddingClient := embedding.New(config.SocketPath())
+	embedder := ingest.NewChunkEmbedder(embeddingClient)
+
+	return &DefaultJobProcessor{
+		checkpoint: NewCheckpointHandlerWithEmbedder(db, embedder, model, logf),
+		sessionEnd: NewSessionEndHandlerWithEmbedder(db, embedder, model, logf),
 	}
 }
 

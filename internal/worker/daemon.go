@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/youyo/memoria/internal/config"
 	"github.com/youyo/memoria/internal/queue"
 )
 
@@ -50,6 +51,14 @@ func NewIngestDaemon(db *sql.DB, q *queue.Queue, runDir, logDir string, idleTime
 		fmt.Fprintf(os.Stderr, format, args...)
 	}
 	d.processor = NewDefaultJobProcessor(db)
+	return d
+}
+
+// NewIngestDaemonWithEmbedding は embedding 付きの IngestDaemon を生成する。
+// embedding worker が UDS 経由で稼働している場合、chunk 保存後に自動で embedding を実行する。
+func NewIngestDaemonWithEmbedding(db *sql.DB, q *queue.Queue, runDir, logDir string, idleTimeout time.Duration, cfg *config.Config) *IngestDaemon {
+	d := NewIngestDaemon(db, q, runDir, logDir, idleTimeout)
+	d.processor = NewDefaultJobProcessorWithEmbedding(db, cfg, d.logf)
 	return d
 }
 

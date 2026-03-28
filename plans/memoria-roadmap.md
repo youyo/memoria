@@ -109,11 +109,11 @@ M01 → M02 → M03 → M04 ──→ M05 → M06
 - [ ] ensureWorker()
 - 📄 詳細: plans/memoria-m10-embedding-integration.md（着手時に生成）
 
-### M11: Ingest に embedding 統合 (`ingest-with-embedding`)
-- [ ] Ingest loop に embedding 呼び出し追加
-- [ ] chunk_embeddings 保存
-- [ ] バッチ embedding
-- 📄 詳細: plans/memoria-m11-ingest-with-embedding.md（着手時に生成）
+### M11: Ingest に embedding 統合 (`ingest-with-embedding`) ✅
+- [x] Ingest loop に embedding 呼び出し追加
+- [x] chunk_embeddings 保存
+- [x] バッチ embedding
+- 📄 詳細: plans/memoria-m11-ingest-with-embedding.md
 
 ### M12: SessionStart + UserPrompt retrieval (`retrieval-hooks`)
 - [ ] `memoria hook session-start` 実装
