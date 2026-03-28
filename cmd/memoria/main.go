@@ -8,6 +8,7 @@ import (
 	"github.com/youyo/memoria/internal/cli"
 	"github.com/youyo/memoria/internal/config"
 	"github.com/youyo/memoria/internal/db"
+	"github.com/youyo/memoria/internal/queue"
 )
 
 // ビルド時に -ldflags で埋め込む変数。
@@ -34,7 +35,6 @@ func main() {
 	cfg := config.DefaultConfig()
 
 	// DB を開く（コマンド実行前に開くことで全コマンドへ DI 可能にする）
-	// M03 では doctor のみ DB を使用する。
 	database, err := db.Open(config.DBFile())
 	if err != nil {
 		// DB 初期化失敗は致命的エラー
@@ -42,6 +42,9 @@ func main() {
 		os.Exit(1)
 	}
 	defer database.Close()
+
+	// Queue を初期化して全コマンドへ DI する
+	q := queue.New(database.SQL())
 
 	ctx := kong.Parse(&c,
 		kong.Name("memoria"),
@@ -51,6 +54,7 @@ func main() {
 		kong.Bind(&w),
 		kong.Bind(cfg),
 		kong.Bind(database),
+		kong.Bind(q),
 	)
 
 	// --config フラグが指定された場合は実際の設定ファイルをロードして cfg に反映する。

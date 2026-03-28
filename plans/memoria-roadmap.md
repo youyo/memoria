@@ -72,11 +72,11 @@ M01 → M02 → M03 → M04 ──→ M05 → M06
 - [ ] 排他制御
 - 📄 詳細: plans/memoria-m04-job-queue.md（着手時に生成）
 
-### M05: Stop hook + checkpoint enqueue (`stop-hook`)
-- [ ] `memoria hook stop` 実装
-- [ ] Project ID 解決
-- [ ] checkpoint_ingest enqueue
-- 📄 詳細: plans/memoria-m05-stop-hook.md（着手時に生成）
+### M05: Stop hook + checkpoint enqueue (`stop-hook`) ✅
+- [x] `memoria hook stop` 実装
+- [x] Project ID 解決
+- [x] checkpoint_ingest enqueue
+- 📄 詳細: plans/memoria-m05-stop-hook.md
 
 ### M06: SessionEnd hook + transcript enqueue (`session-end-hook`)
 - [ ] `memoria hook session-end` 実装

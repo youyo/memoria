@@ -10,6 +10,7 @@ import (
 	"github.com/alecthomas/kong"
 	"github.com/youyo/memoria/internal/config"
 	"github.com/youyo/memoria/internal/db"
+	"github.com/youyo/memoria/internal/queue"
 )
 
 // parseForTest は Kong パーサーをテスト用に構成し、stdout をキャプチャして返す。
@@ -18,7 +19,7 @@ func parseForTest(t *testing.T, args []string) (stdout string, cli *CLI, err err
 	return parseForTestWithDB(t, args, nil)
 }
 
-// parseForTestWithDB は parseForTest に加え、*db.DB を Kong DI に注入できる拡張版。
+// parseForTestWithDB は parseForTest に加え、*db.DB と *queue.Queue を Kong DI に注入できる拡張版。
 func parseForTestWithDB(t *testing.T, args []string, database *db.DB) (stdout string, cli *CLI, err error) {
 	t.Helper()
 
@@ -47,6 +48,9 @@ func parseForTestWithDB(t *testing.T, args []string, database *db.DB) (stdout st
 	}
 	if database != nil {
 		bindOpts = append(bindOpts, kong.Bind(database))
+		// queue.Queue も DB がある場合に DI する
+		q := queue.New(database.SQL())
+		bindOpts = append(bindOpts, kong.Bind(q))
 	}
 
 	parser, newErr := kong.New(&c, bindOpts...)
@@ -216,7 +220,7 @@ func TestNotImplementedCommands(t *testing.T) {
 	commands := [][]string{
 		{"hook", "session-start"},
 		{"hook", "user-prompt"},
-		{"hook", "stop"},
+		// hook stop は M05 で本実装済みのため TestHookStop_* で検証
 		{"hook", "session-end"},
 		{"worker", "start"},
 		{"worker", "stop"},
