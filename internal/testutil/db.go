@@ -12,6 +12,13 @@ import (
 // テスト終了時に自動でクローズされる。
 func OpenTestDB(t *testing.T) *sql.DB {
 	t.Helper()
+	return OpenTestDBFull(t).SQL()
+}
+
+// OpenTestDBFull はテスト用の *db.DB を開き、マイグレーションを適用する。
+// テスト終了時に自動でクローズされる。
+func OpenTestDBFull(t *testing.T) *db.DB {
+	t.Helper()
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "test.db")
 	database, err := db.Open(dbPath)
@@ -19,5 +26,5 @@ func OpenTestDB(t *testing.T) *sql.DB {
 		t.Fatalf("db.Open: %v", err)
 	}
 	t.Cleanup(func() { database.Close() })
-	return database.SQL()
+	return database
 }

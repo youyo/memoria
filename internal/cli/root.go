@@ -20,4 +20,5 @@ type CLI struct {
 	Plugin     PluginCmd     `cmd:"" help:"プラグイン管理コマンド"`
 	Doctor     DoctorCmd     `cmd:"" help:"システム診断"`
 	Version    VersionCmd    `cmd:"" help:"バージョン情報を表示"`
+	Daemon     DaemonCmd     `cmd:"" help:"内部デーモンコマンド" hidden:""`
 }

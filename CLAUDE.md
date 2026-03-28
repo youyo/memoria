@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **memoria** は Claude Code 向けのプロジェクト認識型ローカル RAG メモリシステム。コーディングセッションから意思決定・制約・失敗・TODO・知見を自動抽出し、SQLite にローカル蓄積する。
 
-現在は **M06 session-end-hook 完了**。Kong CLI 骨格 + XDG パス解決 + config.toml 読み書き + config init/show/path コマンド + SQLite スキーマ + マイグレーション管理 + doctor コマンド + SQLite ベースジョブキュー（Enqueue/Dequeue/Ack/Fail/Purge/Stats）+ `memoria hook stop`（checkpoint_ingest enqueue + project ID 解決）+ `memoria hook session-end`（session_end_ingest enqueue + transcript_path 保存）が実装済み。
+現在は **M07 ingest-worker-lifecycle 完了**。Kong CLI 骨格 + XDG パス解決 + config.toml 読み書き + config init/show/path コマンド + SQLite スキーマ + マイグレーション管理 + doctor コマンド + SQLite ベースジョブキュー（Enqueue/Dequeue/Ack/Fail/Purge/Stats）+ `memoria hook stop`（checkpoint_ingest enqueue + project ID 解決）+ `memoria hook session-end`（session_end_ingest enqueue + transcript_path 保存）+ ingest worker ライフサイクル管理（daemon ingest / worker start/stop/status / heartbeat / lease / flock / EnsureIngest 本実装）が実装済み。
 
 ## ビルド・テスト・リント
 
@@ -118,6 +118,17 @@ plugin/memoria/
 ```
 
 インストール: `cp -r plugin/memoria ~/.claude/plugins/`
+
+## M07 からのハンドオフ（実装済み ingest worker ライフサイクル）
+
+- `internal/worker/process.go`: `AcquireLock(path)` / `WritePID(path, pid)` / `ReadPID(path)` / `RemovePID(path)` / `TouchFile(path)` / `FileExists(path)` / `RemoveFile(path)` — syscall.Flock ベースのファイルロック
+- `internal/worker/lease.go`: `UpsertLease()` / `DeleteLease()` / `GetLease()` / `CheckLiveness()` / `UpdateHeartbeat()` / `InsertProbe()` / `CheckProbeResponded()` / `RespondToProbes()` / `DeletePendingProbes()` — worker_leases + worker_probes CRUD
+- `internal/worker/heartbeat.go`: `RunHeartbeat(ctx, db, workerName, workerID, interval, logf)` — 1 秒間隔で heartbeat goroutine
+- `internal/worker/daemon.go`: `IngestDaemon` + `Run(ctx)` — メインループ（flock → PID 書き込み → lease upsert → heartbeat goroutine → watchdog goroutine → Dequeue ループ → idle timeout / stop ファイル停止）
+- `internal/worker/ensure.go`: `EnsureIngest(ctx)` 本実装（alive→リターン / suspect→probe / stale/not_running→spawn）
+- `internal/cli/daemon.go`: `DaemonCmd` + `DaemonIngestCmd` — `memoria daemon ingest`（hidden コマンド）
+- `internal/cli/worker.go`: `WorkerStartCmd` / `WorkerStopCmd` / `WorkerStatusCmd` 本実装
+- `testutil.OpenTestDBFull(t)` が `*db.DB` を返すように拡張
 
 ## M04 からのハンドオフ（実装済み queue パッケージ）
 
