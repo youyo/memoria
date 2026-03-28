@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -26,14 +27,13 @@ type WorkerCmd struct {
 // WorkerStartCmd は worker start コマンド。
 type WorkerStartCmd struct{}
 
-// Run は worker start を実行する。
+// Run は worker start を実行する（本番用: DB を自動オープン）。
 func (c *WorkerStartCmd) Run(globals *Globals, w *io.Writer) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
 	worker.EnsureIngest(ctx)
 
-	// liveness を確認して結果を出力
 	database, err := openWorkerDB()
 	if err != nil {
 		fmt.Fprintln(*w, "started")
@@ -41,7 +41,20 @@ func (c *WorkerStartCmd) Run(globals *Globals, w *io.Writer) error {
 	}
 	defer database.Close()
 
-	liveness, _, err := worker.CheckLiveness(ctx, database.SQL(), worker.WorkerNameIngest)
+	return c.runWithSQL(ctx, w, database.SQL())
+}
+
+// RunWithDB はテスト可能な実装。sqlDB と runDir を外部から注入する。
+func (c *WorkerStartCmd) RunWithDB(globals *Globals, w *io.Writer, sqlDB *sql.DB) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	// テスト時は EnsureIngest を呼ばない（本番 daemon を起動しない）
+	return c.runWithSQL(ctx, w, sqlDB)
+}
+
+func (c *WorkerStartCmd) runWithSQL(ctx context.Context, w *io.Writer, sqlDB *sql.DB) error {
+	liveness, _, err := worker.CheckLiveness(ctx, sqlDB, worker.WorkerNameIngest)
 	if err != nil || liveness == worker.LivenessNotRunning {
 		fmt.Fprintln(*w, "started")
 		return nil
@@ -57,16 +70,11 @@ func (c *WorkerStartCmd) Run(globals *Globals, w *io.Writer) error {
 // WorkerStopCmd は worker stop コマンド。
 type WorkerStopCmd struct{}
 
-// Run は worker stop を実行する。
+// Run は worker stop を実行する（本番用: DB と runDir を自動解決）。
 func (c *WorkerStopCmd) Run(globals *Globals, w *io.Writer) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 
-	runDir := config.RunDir()
-	stopPath := runDir + "/ingest.stop"
-	pidPath := runDir + "/ingest.pid"
-
-	// liveness 確認
 	database, err := openWorkerDB()
 	if err != nil {
 		fmt.Fprintln(*w, "was not running")
@@ -74,7 +82,22 @@ func (c *WorkerStopCmd) Run(globals *Globals, w *io.Writer) error {
 	}
 	defer database.Close()
 
-	liveness, _, err := worker.CheckLiveness(ctx, database.SQL(), worker.WorkerNameIngest)
+	return c.runWithSQL(ctx, w, database.SQL(), config.RunDir())
+}
+
+// RunWithDB はテスト可能な実装。sqlDB と runDir を外部から注入する。
+func (c *WorkerStopCmd) RunWithDB(globals *Globals, w *io.Writer, sqlDB *sql.DB, runDir string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	return c.runWithSQL(ctx, w, sqlDB, runDir)
+}
+
+func (c *WorkerStopCmd) runWithSQL(ctx context.Context, w *io.Writer, sqlDB *sql.DB, runDir string) error {
+	stopPath := runDir + "/ingest.stop"
+	pidPath := runDir + "/ingest.pid"
+
+	liveness, _, err := worker.CheckLiveness(ctx, sqlDB, worker.WorkerNameIngest)
 	if err != nil || liveness == worker.LivenessNotRunning {
 		fmt.Fprintln(*w, "was not running")
 		return nil
@@ -96,7 +119,7 @@ func (c *WorkerStopCmd) Run(globals *Globals, w *io.Writer) error {
 		case <-ctx.Done():
 			goto forceKill
 		case <-ticker.C:
-			liveness, _, _ = worker.CheckLiveness(ctx, database.SQL(), worker.WorkerNameIngest)
+			liveness, _, _ = worker.CheckLiveness(ctx, sqlDB, worker.WorkerNameIngest)
 			if liveness == worker.LivenessNotRunning || liveness == worker.LivenessStale {
 				fmt.Fprintln(*w, "stopped")
 				return nil
@@ -170,7 +193,7 @@ type WorkerStatusOutput struct {
 // WorkerStatusCmd は worker status コマンド。
 type WorkerStatusCmd struct{}
 
-// Run は worker status を実行する。
+// Run は worker status を実行する（本番用: DB を自動オープン）。
 func (c *WorkerStatusCmd) Run(globals *Globals, w *io.Writer) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -182,19 +205,39 @@ func (c *WorkerStatusCmd) Run(globals *Globals, w *io.Writer) error {
 	database, err := openWorkerDB()
 	if err == nil {
 		defer database.Close()
-
-		liveness, lease, err := worker.CheckLiveness(ctx, database.SQL(), worker.WorkerNameIngest)
-		if err == nil {
-			output.Status = liveness.String()
-			if lease != nil {
-				output.WorkerID = lease.WorkerID
-				output.PID = lease.PID
-				output.LastHeartbeatAt = lease.LastHeartbeatAt.UTC().Format(time.RFC3339)
-				output.UptimeSeconds = int64(time.Since(lease.StartedAt).Seconds())
-			}
-		}
+		c.fillOutput(ctx, database.SQL(), &output)
 	}
 
+	return c.writeOutput(globals, w, &output)
+}
+
+// RunWithDB はテスト可能な実装。sqlDB を外部から注入する。
+func (c *WorkerStatusCmd) RunWithDB(globals *Globals, w *io.Writer, sqlDB *sql.DB) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	output := WorkerStatusOutput{
+		Status: "not_running",
+	}
+
+	c.fillOutput(ctx, sqlDB, &output)
+	return c.writeOutput(globals, w, &output)
+}
+
+func (c *WorkerStatusCmd) fillOutput(ctx context.Context, sqlDB *sql.DB, output *WorkerStatusOutput) {
+	liveness, lease, err := worker.CheckLiveness(ctx, sqlDB, worker.WorkerNameIngest)
+	if err == nil {
+		output.Status = liveness.String()
+		if lease != nil {
+			output.WorkerID = lease.WorkerID
+			output.PID = lease.PID
+			output.LastHeartbeatAt = lease.LastHeartbeatAt.UTC().Format(time.RFC3339)
+			output.UptimeSeconds = int64(time.Since(lease.StartedAt).Seconds())
+		}
+	}
+}
+
+func (c *WorkerStatusCmd) writeOutput(globals *Globals, w *io.Writer, output *WorkerStatusOutput) error {
 	if globals.Format == "json" {
 		b, _ := json.Marshal(output)
 		fmt.Fprintln(*w, string(b))

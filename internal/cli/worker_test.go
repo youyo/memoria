@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"io"
 	"strings"
 	"testing"
 
@@ -11,50 +12,66 @@ var _ = testutil.OpenTestDBFull // suppress unused import warning
 
 func TestWorkerStatus_NotRunning(t *testing.T) {
 	database := testutil.OpenTestDBFull(t)
-	stdout, _, err := parseForTestWithDB(t, []string{"worker", "status"}, database)
-	if err != nil {
+	cmd := &WorkerStatusCmd{}
+	globals := &Globals{}
+	var buf strings.Builder
+	w := io.Writer(&buf)
+
+	if err := cmd.RunWithDB(globals, &w, database.SQL()); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if !strings.Contains(stdout, "not_running") {
-		t.Errorf("expected 'not_running' in status output, got: %s", stdout)
+	if !strings.Contains(buf.String(), "not_running") {
+		t.Errorf("expected 'not_running' in status output, got: %s", buf.String())
 	}
 }
 
 func TestWorkerStatus_JSON(t *testing.T) {
 	database := testutil.OpenTestDBFull(t)
-	stdout, _, err := parseForTestWithDB(t, []string{"--format", "json", "worker", "status"}, database)
-	if err != nil {
+	cmd := &WorkerStatusCmd{}
+	globals := &Globals{Format: "json"}
+	var buf strings.Builder
+	w := io.Writer(&buf)
+
+	if err := cmd.RunWithDB(globals, &w, database.SQL()); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if !strings.Contains(stdout, `"status"`) {
-		t.Errorf("expected JSON output with 'status' field, got: %s", stdout)
+	if !strings.Contains(buf.String(), `"status"`) {
+		t.Errorf("expected JSON output with 'status' field, got: %s", buf.String())
 	}
-	if !strings.Contains(stdout, "not_running") {
-		t.Errorf("expected 'not_running' in JSON output, got: %s", stdout)
+	if !strings.Contains(buf.String(), "not_running") {
+		t.Errorf("expected 'not_running' in JSON output, got: %s", buf.String())
 	}
 }
 
 func TestWorkerStart_NotImplemented(t *testing.T) {
-	// worker start は EnsureIngest を呼ぶが、テスト環境ではエラーなく終了するはず
-	// DB がない場合も graceful に終了する
-	stdout, _, err := parseForTest(t, []string{"worker", "start"})
-	if err != nil {
+	database := testutil.OpenTestDBFull(t)
+	cmd := &WorkerStartCmd{}
+	globals := &Globals{}
+	var buf strings.Builder
+	w := io.Writer(&buf)
+
+	if err := cmd.RunWithDB(globals, &w, database.SQL()); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	// "started" または "already running" のいずれかが出力される
-	if !strings.Contains(stdout, "started") && !strings.Contains(stdout, "already running") {
-		t.Errorf("expected 'started' or 'already running', got: %s", stdout)
+	// 空の DB では worker は起動していないので "started" が返る
+	if !strings.Contains(buf.String(), "started") && !strings.Contains(buf.String(), "already running") {
+		t.Errorf("expected 'started' or 'already running', got: %s", buf.String())
 	}
 }
 
 func TestWorkerStop_NotRunning(t *testing.T) {
-	// worker stop は起動していなければ "was not running" を出力する
-	stdout, _, err := parseForTest(t, []string{"worker", "stop"})
-	if err != nil {
+	database := testutil.OpenTestDBFull(t)
+	runDir := t.TempDir()
+	cmd := &WorkerStopCmd{}
+	globals := &Globals{}
+	var buf strings.Builder
+	w := io.Writer(&buf)
+
+	if err := cmd.RunWithDB(globals, &w, database.SQL(), runDir); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if !strings.Contains(stdout, "was not running") && !strings.Contains(stdout, "stopped") {
-		t.Errorf("expected 'was not running' or 'stopped', got: %s", stdout)
+	if !strings.Contains(buf.String(), "was not running") && !strings.Contains(buf.String(), "stopped") {
+		t.Errorf("expected 'was not running' or 'stopped', got: %s", buf.String())
 	}
 }
 
