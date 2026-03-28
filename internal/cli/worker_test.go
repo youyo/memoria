@@ -43,6 +43,36 @@ func TestWorkerStatus_JSON(t *testing.T) {
 	}
 }
 
+func TestWorkerStatus_EmbeddingField_JSON(t *testing.T) {
+	database := testutil.OpenTestDBFull(t)
+	cmd := &WorkerStatusCmd{}
+	globals := &Globals{Format: "json"}
+	var buf strings.Builder
+	w := io.Writer(&buf)
+
+	if err := cmd.RunWithDB(globals, &w, database.SQL()); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(buf.String(), `"embedding"`) {
+		t.Errorf("expected 'embedding' field in JSON output, got: %s", buf.String())
+	}
+}
+
+func TestWorkerStatus_EmbeddingField_Text(t *testing.T) {
+	database := testutil.OpenTestDBFull(t)
+	cmd := &WorkerStatusCmd{}
+	globals := &Globals{}
+	var buf strings.Builder
+	w := io.Writer(&buf)
+
+	if err := cmd.RunWithDB(globals, &w, database.SQL()); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(buf.String(), "embedding:") {
+		t.Errorf("expected 'embedding:' in text output, got: %s", buf.String())
+	}
+}
+
 func TestWorkerStart_NotImplemented(t *testing.T) {
 	database := testutil.OpenTestDBFull(t)
 	cmd := &WorkerStartCmd{}
@@ -72,6 +102,22 @@ func TestWorkerStop_NotRunning(t *testing.T) {
 	}
 	if !strings.Contains(buf.String(), "was not running") && !strings.Contains(buf.String(), "stopped") {
 		t.Errorf("expected 'was not running' or 'stopped', got: %s", buf.String())
+	}
+}
+
+func TestWorkerStop_EmbeddingNotRunning(t *testing.T) {
+	database := testutil.OpenTestDBFull(t)
+	runDir := t.TempDir()
+	cmd := &WorkerStopCmd{}
+	globals := &Globals{}
+	var buf strings.Builder
+	w := io.Writer(&buf)
+
+	if err := cmd.RunWithDB(globals, &w, database.SQL(), runDir); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(buf.String(), "was not running") && !strings.Contains(buf.String(), "stopped") {
+		t.Errorf("expected stop message, got: %s", buf.String())
 	}
 }
 

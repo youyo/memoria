@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **memoria** は Claude Code 向けのプロジェクト認識型ローカル RAG メモリシステム。コーディングセッションから意思決定・制約・失敗・TODO・知見を自動抽出し、SQLite にローカル蓄積する。
 
-現在は **M09 embedding-worker 完了**。Kong CLI 骨格 + XDG パス解決 + config.toml 読み書き + config init/show/path コマンド + SQLite スキーマ + マイグレーション管理 + doctor コマンド + SQLite ベースジョブキュー（Enqueue/Dequeue/Ack/Fail/Purge/Stats）+ `memoria hook stop`（checkpoint_ingest enqueue + project ID 解決）+ `memoria hook session-end`（session_end_ingest enqueue + transcript_path 保存）+ ingest worker ライフサイクル管理（daemon ingest / worker start/stop/status / heartbeat / lease / flock / EnsureIngest 本実装）+ ingest worker ジョブ処理ループ（checkpoint_ingest / session_end_ingest 処理 / transcript パーサー / chunker / ヒューリスティック enrichment / chunks/sessions/turns DB 書き込み / SHA-256 重複排除 / FTS5 自動同期）+ **Python embedding worker**（FastAPI + sentence-transformers Ruri v3 / Unix Domain Socket / /embed + /health エンドポイント / idle timeout / PID・lock ファイル管理）が実装済み。
+現在は **M10 embedding-integration 完了**。Kong CLI 骨格 + XDG パス解決 + config.toml 読み書き + config init/show/path コマンド + SQLite スキーマ + マイグレーション管理 + doctor コマンド + SQLite ベースジョブキュー（Enqueue/Dequeue/Ack/Fail/Purge/Stats）+ `memoria hook stop`（checkpoint_ingest enqueue + project ID 解決）+ `memoria hook session-end`（session_end_ingest enqueue + transcript_path 保存）+ ingest worker ライフサイクル管理（daemon ingest / worker start/stop/status / heartbeat / lease / flock / EnsureIngest 本実装）+ ingest worker ジョブ処理ループ（checkpoint_ingest / session_end_ingest 処理 / transcript パーサー / chunker / ヒューリスティック enrichment / chunks/sessions/turns DB 書き込み / SHA-256 重複排除 / FTS5 自動同期）+ **Python embedding worker**（FastAPI + sentence-transformers Ruri v3 / Unix Domain Socket / /embed + /health エンドポイント / idle timeout / PID・lock ファイル管理）+ **Go ↔ Python UDS 通信統合**（internal/embedding.Client / EnsureEmbedding / worker start+stop+status embedding 対応）が実装済み。
 
 ## ビルド・テスト・リント
 
@@ -118,6 +118,12 @@ plugin/memoria/
 ```
 
 インストール: `cp -r plugin/memoria ~/.claude/plugins/`
+
+## M10 からのハンドオフ（実装済み Go ↔ Python UDS 通信統合）
+
+- `internal/embedding/client.go`: `Client` — UDS HTTP クライアント。`New(socketPath)` / `NewWithHTTPClient(baseURL, httpClient)`（テスト用 DI）/ `Health(ctx)` / `Embed(ctx, texts)`
+- `internal/worker/ensure_embedding.go`: `EnsureEmbedding(ctx, cfg)` — health check → spawn → health ポーリング。`spawnEmbeddingWorkerFn` 関数変数でテスト差し替え可能。`buildEmbeddingWorkerArgs(cfg, sockPath, workerScript)` で引数構築を分離
+- `internal/cli/worker.go`: `WorkerStatusOutput.Embedding EmbeddingWorkerStatus` フィールド追加 / `checkEmbeddingStatus(ctx, socketPath, runDir)` / `stopWorkerByPID(ctx, pidPath)` 共通ヘルパー / `WorkerStartCmd.Run()` で `EnsureEmbedding` 呼び出し / `WorkerStopCmd.runWithSQL()` で embedding 停止
 
 ## M09 からのハンドオフ（実装済み Python embedding worker）
 

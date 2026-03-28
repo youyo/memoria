@@ -7,11 +7,13 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"syscall"
 	"time"
 
 	"github.com/youyo/memoria/internal/config"
 	"github.com/youyo/memoria/internal/db"
+	"github.com/youyo/memoria/internal/embedding"
 	"github.com/youyo/memoria/internal/queue"
 	"github.com/youyo/memoria/internal/worker"
 )
@@ -34,6 +36,14 @@ func (c *WorkerStartCmd) Run(globals *Globals, w *io.Writer) error {
 
 	worker.EnsureIngest(ctx)
 
+	// embedding worker も起動を試みる（失敗は警告のみ）
+	cfg, cfgErr := config.Load(config.ConfigFile())
+	if cfgErr == nil {
+		if err := worker.EnsureEmbedding(ctx, cfg); err != nil {
+			fmt.Fprintf(os.Stderr, "memoria worker start: embedding: %v\n", err)
+		}
+	}
+
 	database, err := openWorkerDB()
 	if err != nil {
 		fmt.Fprintln(*w, "started")
@@ -49,7 +59,7 @@ func (c *WorkerStartCmd) RunWithDB(globals *Globals, w *io.Writer, sqlDB *sql.DB
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	// テスト時は EnsureIngest を呼ばない（本番 daemon を起動しない）
+	// テスト時は EnsureIngest / EnsureEmbedding を呼ばない（本番 daemon を起動しない）
 	return c.runWithSQL(ctx, w, sqlDB)
 }
 
@@ -94,6 +104,9 @@ func (c *WorkerStopCmd) RunWithDB(globals *Globals, w *io.Writer, sqlDB *sql.DB,
 }
 
 func (c *WorkerStopCmd) runWithSQL(ctx context.Context, w *io.Writer, sqlDB *sql.DB, runDir string) error {
+	// embedding worker を先に停止
+	stopWorkerByPID(ctx, filepath.Join(runDir, "embedding.pid"))
+
 	stopPath := runDir + "/ingest.stop"
 	pidPath := runDir + "/ingest.pid"
 
@@ -172,6 +185,38 @@ sigkill:
 	return nil
 }
 
+// stopWorkerByPID は PID ファイルからプロセスを探して SIGTERM -> SIGKILL で停止する。
+// ingest / embedding 共通ヘルパー。
+func stopWorkerByPID(ctx context.Context, pidPath string) {
+	pid, err := worker.ReadPID(pidPath)
+	if err != nil || pid == 0 {
+		return
+	}
+	proc, err := os.FindProcess(pid)
+	if err != nil {
+		return
+	}
+	_ = proc.Signal(syscall.SIGTERM)
+
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		select {
+		case <-ctx.Done():
+			_ = proc.Signal(syscall.SIGKILL)
+			worker.RemovePID(pidPath) //nolint:errcheck
+			return
+		case <-time.After(200 * time.Millisecond):
+			if err := proc.Signal(syscall.Signal(0)); err != nil {
+				// プロセスが終了した
+				worker.RemovePID(pidPath) //nolint:errcheck
+				return
+			}
+		}
+	}
+	_ = proc.Signal(syscall.SIGKILL)
+	worker.RemovePID(pidPath) //nolint:errcheck
+}
+
 // WorkerRestartCmd は worker restart コマンド。
 type WorkerRestartCmd struct{}
 
@@ -181,6 +226,15 @@ func (c *WorkerRestartCmd) Run(globals *Globals, w *io.Writer) error {
 	return nil
 }
 
+// EmbeddingWorkerStatus は embedding worker の状態を表す。
+type EmbeddingWorkerStatus struct {
+	Status     string `json:"status"` // "running" | "not_running" | "unknown"
+	Model      string `json:"model,omitempty"`
+	Dimensions int    `json:"dimensions,omitempty"`
+	Device     string `json:"device,omitempty"`
+	PID        int    `json:"pid,omitempty"`
+}
+
 // WorkerStatusOutput は worker status の JSON 出力構造体。
 type WorkerStatusOutput struct {
 	Status          string `json:"status"`
@@ -188,6 +242,9 @@ type WorkerStatusOutput struct {
 	PID             int    `json:"pid,omitempty"`
 	LastHeartbeatAt string `json:"last_heartbeat_at,omitempty"`
 	UptimeSeconds   int64  `json:"uptime_seconds,omitempty"`
+
+	// M10 追加フィールド
+	Embedding EmbeddingWorkerStatus `json:"embedding"`
 }
 
 // WorkerStatusCmd は worker status コマンド。
@@ -208,6 +265,9 @@ func (c *WorkerStatusCmd) Run(globals *Globals, w *io.Writer) error {
 		c.fillOutput(ctx, database.SQL(), &output)
 	}
 
+	// embedding worker の状態を確認
+	output.Embedding = checkEmbeddingStatus(ctx, config.SocketPath(), config.RunDir())
+
 	return c.writeOutput(globals, w, &output)
 }
 
@@ -221,6 +281,10 @@ func (c *WorkerStatusCmd) RunWithDB(globals *Globals, w *io.Writer, sqlDB *sql.D
 	}
 
 	c.fillOutput(ctx, sqlDB, &output)
+
+	// embedding worker の状態を確認（テスト時は接続できないので "not_running" になる）
+	output.Embedding = checkEmbeddingStatus(ctx, config.SocketPath(), config.RunDir())
+
 	return c.writeOutput(globals, w, &output)
 }
 
@@ -235,6 +299,31 @@ func (c *WorkerStatusCmd) fillOutput(ctx context.Context, sqlDB *sql.DB, output 
 			output.UptimeSeconds = int64(time.Since(lease.StartedAt).Seconds())
 		}
 	}
+}
+
+// checkEmbeddingStatus は embedding worker の状態を確認して EmbeddingWorkerStatus を返す。
+func checkEmbeddingStatus(ctx context.Context, socketPath, runDir string) EmbeddingWorkerStatus {
+	// 500ms タイムアウトで health チェック
+	healthCtx, cancel := context.WithTimeout(ctx, 500*time.Millisecond)
+	defer cancel()
+
+	client := embedding.New(socketPath)
+	resp, err := client.Health(healthCtx)
+	if err == nil && resp != nil {
+		status := EmbeddingWorkerStatus{
+			Status:     "running",
+			Model:      resp.Model,
+			Dimensions: resp.Dimensions,
+			Device:     resp.Device,
+		}
+		// PID ファイルから PID を取得
+		pidPath := filepath.Join(runDir, "embedding.pid")
+		pid, _ := worker.ReadPID(pidPath)
+		status.PID = pid
+		return status
+	}
+
+	return EmbeddingWorkerStatus{Status: "not_running"}
 }
 
 func (c *WorkerStatusCmd) writeOutput(globals *Globals, w *io.Writer, output *WorkerStatusOutput) error {
@@ -254,6 +343,13 @@ func (c *WorkerStatusCmd) writeOutput(globals *Globals, w *io.Writer, output *Wo
 		}
 		if output.UptimeSeconds > 0 {
 			fmt.Fprintf(*w, "uptime_seconds: %d\n", output.UptimeSeconds)
+		}
+		fmt.Fprintf(*w, "embedding: %s\n", output.Embedding.Status)
+		if output.Embedding.Model != "" {
+			fmt.Fprintf(*w, "embedding_model: %s\n", output.Embedding.Model)
+		}
+		if output.Embedding.PID > 0 {
+			fmt.Fprintf(*w, "embedding_pid: %d\n", output.Embedding.PID)
 		}
 	}
 	return nil
