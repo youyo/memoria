@@ -6,6 +6,7 @@ import (
 
 	"github.com/alecthomas/kong"
 	"github.com/youyo/memoria/internal/cli"
+	"github.com/youyo/memoria/internal/config"
 )
 
 // ビルド時に -ldflags で埋め込む変数。
@@ -26,13 +27,35 @@ func main() {
 
 	w := io.Writer(os.Stdout)
 
+	// 一旦 --config フラグを事前パースしてパスを取得するため、
+	// まずデフォルト設定でバインドし、パース後に実際の設定をロードする。
+	// config パッケージの DI: *config.Config を Kong Bind で全コマンドに注入。
+	cfg := config.DefaultConfig()
+
 	ctx := kong.Parse(&c,
 		kong.Name("memoria"),
 		kong.Description("Claude Code 向けプロジェクト認識型ローカル RAG メモリシステム"),
 		kong.UsageOnError(),
 		kong.Bind(info),
 		kong.Bind(&w),
+		kong.Bind(cfg),
 	)
+
+	// --config フラグが指定された場合は実際の設定ファイルをロードして cfg に反映する。
+	if c.Globals.ConfigPath != "" {
+		loaded, err := config.Load(c.Globals.ConfigPath)
+		if err != nil {
+			ctx.FatalIfErrorf(err)
+		}
+		*cfg = *loaded
+	} else {
+		// デフォルトパスから読み込む（ファイルが存在しない場合はデフォルト値を使用）
+		loaded, err := config.Load(config.ConfigFile())
+		if err != nil {
+			ctx.FatalIfErrorf(err)
+		}
+		*cfg = *loaded
+	}
 
 	err := ctx.Run(&c.Globals)
 	ctx.FatalIfErrorf(err)

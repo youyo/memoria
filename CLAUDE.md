@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **memoria** は Claude Code 向けのプロジェクト認識型ローカル RAG メモリシステム。コーディングセッションから意思決定・制約・失敗・TODO・知見を自動抽出し、SQLite にローカル蓄積する。
 
-現在は **M01 CLI skeleton 完了**。Kong CLI 骨格が実装済み。
+現在は **M02 config-system 完了**。Kong CLI 骨格 + XDG パス解決 + config.toml 読み書き + config init/show/path コマンドが実装済み。
 
 ## ビルド・テスト・リント
 
@@ -98,6 +98,7 @@ SQLite (~/.local/share/memoria/)
 - **SQLite**: ローカル完結、外部 API 不要
 - **Kong**: Go CLI framework
 - **sentence-transformers / Ruri v3**: テキスト embedding モデル
+- **github.com/BurntSushi/toml**: TOML 設定ファイル読み書き
 
 ## パス設計（XDG 準拠）
 
@@ -117,6 +118,15 @@ plugin/memoria/
 ```
 
 インストール: `cp -r plugin/memoria ~/.claude/plugins/`
+
+## M02 からのハンドオフ（実装済み DI パターン）
+
+- `Globals.ConfigPath string` (`--config` フラグ / `MEMORIA_CONFIG` 環境変数)
+- `*config.Config` は `kong.Bind(cfg)` で全コマンドの `Run()` に注入
+- `config.Load()` はファイル不在時に `DefaultConfig()` を返す（エラーなし）
+- `config.Save()` は一時ファイル + `os.Rename()` でアトミック書き込み
+- `internal/config` パッケージ: `paths.go`（XDG パス）と `config.go`（構造体・Load/Save）
+- GOPROXY=direct + GONOSUMDB="*" + GOMODCACHE=/tmp/claude/gomod ワークアラウンドが必要（TLS 証明書検証問題）
 
 ## Worker 起動方針
 

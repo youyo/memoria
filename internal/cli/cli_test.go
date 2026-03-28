@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/alecthomas/kong"
+	"github.com/youyo/memoria/internal/config"
 )
 
 // parseForTest は Kong パーサーをテスト用に構成し、stdout をキャプチャして返す。
@@ -25,6 +26,7 @@ func parseForTest(t *testing.T, args []string) (stdout string, cli *CLI, err err
 	}
 
 	w := io.Writer(&buf)
+	cfg := config.DefaultConfig()
 
 	parser, newErr := kong.New(&c,
 		kong.Name("memoria"),
@@ -32,6 +34,7 @@ func parseForTest(t *testing.T, args []string) (stdout string, cli *CLI, err err
 		kong.Writers(&buf, &buf),
 		kong.Bind(info),
 		kong.Bind(&w),
+		kong.Bind(cfg),
 		kong.Exit(func(code int) {
 			// テスト中は os.Exit しない
 		}),
@@ -196,6 +199,8 @@ func TestNoColorFlag(t *testing.T) {
 }
 
 func TestNotImplementedCommands(t *testing.T) {
+	// config init/show/path は M02 で実装済みのため除外
+	// config print-hook は M12 で実装予定
 	commands := [][]string{
 		{"doctor"},
 		{"hook", "session-start"},
@@ -209,9 +214,6 @@ func TestNotImplementedCommands(t *testing.T) {
 		{"memory", "list"},
 		{"memory", "stats"},
 		{"memory", "reindex"},
-		{"config", "init"},
-		{"config", "show"},
-		{"config", "path"},
 		{"config", "print-hook"},
 		{"completion", "bash"},
 		{"completion", "zsh"},

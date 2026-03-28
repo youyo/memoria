@@ -2,10 +2,10 @@ package cli
 
 // Globals はすべてのコマンドで共有されるグローバルフラグを定義する。
 type Globals struct {
-	Config  string `help:"設定ファイルパス" type:"path" env:"MEMORIA_CONFIG"`
-	Verbose bool   `help:"詳細出力を有効にする" short:"v"`
-	NoColor bool   `help:"カラー出力を無効にする" name:"no-color"`
-	Format  string `help:"出力フォーマット (text, json)" default:"text" enum:"text,json"`
+	ConfigPath string `help:"設定ファイルパス" type:"path" env:"MEMORIA_CONFIG" name:"config"`
+	Verbose    bool   `help:"詳細出力を有効にする" short:"v"`
+	NoColor    bool   `help:"カラー出力を無効にする" name:"no-color"`
+	Format     string `help:"出力フォーマット (text, json)" default:"text" enum:"text,json"`
 }
 
 // CLI はメモリア CLI のルート構造体。Kong が struct tag からコマンドツリーを構築する。
