@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **memoria** は Claude Code 向けのプロジェクト認識型ローカル RAG メモリシステム。コーディングセッションから意思決定・制約・失敗・TODO・知見を自動抽出し、SQLite にローカル蓄積する。
 
-現在は **M03 sqlite-schema 完了**。Kong CLI 骨格 + XDG パス解決 + config.toml 読み書き + config init/show/path コマンド + SQLite スキーマ + マイグレーション管理 + doctor コマンドが実装済み。
+現在は **M04 job-queue 完了**。Kong CLI 骨格 + XDG パス解決 + config.toml 読み書き + config init/show/path コマンド + SQLite スキーマ + マイグレーション管理 + doctor コマンド + SQLite ベースジョブキュー（Enqueue/Dequeue/Ack/Fail/Purge/Stats）が実装済み。
 
 ## ビルド・テスト・リント
 
@@ -118,6 +118,16 @@ plugin/memoria/
 ```
 
 インストール: `cp -r plugin/memoria ~/.claude/plugins/`
+
+## M04 からのハンドオフ（実装済み queue パッケージ）
+
+- `internal/queue` パッケージ: `queue.New(db.SQL())` で Queue を生成
+- `queue.Enqueue(ctx, jobType, payloadJSON)` / `queue.EnqueueAt(ctx, jobType, payloadJSON, runAfter)`
+- `queue.Dequeue(ctx, workerID)` / `queue.DequeueWithOptions(ctx, workerID, DequeueOptions{StaleTimeout: ...})`
+- `queue.Ack(ctx, jobID)` / `queue.Fail(ctx, jobID, errMsg)` / `queue.Purge(ctx, duration)` / `queue.Stats(ctx)`
+- BEGIN IMMEDIATE による排他制御（withImmediateTx ヘルパー）
+- Backoff: 5s → 30s → 300s（SPEC §7.3 準拠）
+- M05（Stop hook）では `q.Enqueue(ctx, queue.JobTypeCheckpointIngest, payload)` で即利用可能
 
 ## M03 からのハンドオフ（実装済み DI パターン）
 
