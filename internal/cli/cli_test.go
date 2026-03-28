@@ -215,19 +215,18 @@ func TestNoColorFlag(t *testing.T) {
 
 func TestNotImplementedCommands(t *testing.T) {
 	// config init/show/path は M02 で実装済みのため除外
-	// config print-hook は M12 で実装予定
+	// config print-hook は M12 で実装済みのため除外（TestConfigPrintHook_* で検証）
+	// hook session-start は M12 で実装済みのため除外（TestHookSessionStart_* で検証）
+	// hook user-prompt は M12 で実装済みのため除外（TestHookUserPrompt_* で検証）
+	// hook stop は M05 で本実装済みのため TestHookStop_* で検証
+	// hook session-end は M06 で本実装済みのため TestHookSessionEnd_* で検証
+	// worker start/stop/status は M07 で本実装済みのため TestWorker* で検証
 	// doctor は M03 で実装済みのため除外（doctor_test.go で専用テスト）
 	commands := [][]string{
-		{"hook", "session-start"},
-		{"hook", "user-prompt"},
-		// hook stop は M05 で本実装済みのため TestHookStop_* で検証
-		// hook session-end は M06 で本実装済みのため TestHookSessionEnd_* で検証
-		// worker start/stop/status は M07 で本実装済みのため TestWorker* で検証
 		{"worker", "restart"},
 		{"memory", "list"},
 		{"memory", "stats"},
 		{"memory", "reindex"},
-		{"config", "print-hook"},
 		{"completion", "bash"},
 		{"completion", "zsh"},
 		{"completion", "fish"},

@@ -98,8 +98,41 @@ func (c *ConfigPathCmd) Run(globals *Globals, w *io.Writer) error {
 // ConfigPrintHookCmd は config print-hook コマンド。
 type ConfigPrintHookCmd struct{}
 
+// hookConfig は Claude Code の .claude/settings.json に貼り付ける hooks 設定を表す。
+type hookConfig struct {
+	Hooks map[string][]hookEntry `json:"hooks"`
+}
+
+type hookEntry struct {
+	Hooks []hookCommand `json:"hooks"`
+}
+
+type hookCommand struct {
+	Type    string `json:"type"`
+	Command string `json:"command"`
+}
+
 // Run は config print-hook を実行する。
+// Claude Code の settings.json に貼り付ける hooks 設定断片を JSON で出力する。
 func (c *ConfigPrintHookCmd) Run(globals *Globals, w *io.Writer) error {
-	fmt.Fprintln(*w, "not implemented")
-	return nil
+	cfg := hookConfig{
+		Hooks: map[string][]hookEntry{
+			"SessionStart": {
+				{Hooks: []hookCommand{{Type: "command", Command: "memoria hook session-start"}}},
+			},
+			"UserPromptSubmit": {
+				{Hooks: []hookCommand{{Type: "command", Command: "memoria hook user-prompt"}}},
+			},
+			"Stop": {
+				{Hooks: []hookCommand{{Type: "command", Command: "memoria hook stop"}}},
+			},
+			"SessionEnd": {
+				{Hooks: []hookCommand{{Type: "command", Command: "memoria hook session-end"}}},
+			},
+		},
+	}
+
+	enc := json.NewEncoder(*w)
+	enc.SetIndent("", "  ")
+	return enc.Encode(cfg)
 }

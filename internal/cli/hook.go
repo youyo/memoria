@@ -9,9 +9,12 @@ import (
 	"os"
 	"time"
 
+	cfg_pkg "github.com/youyo/memoria/internal/config"
 	"github.com/youyo/memoria/internal/db"
+	"github.com/youyo/memoria/internal/embedding"
 	"github.com/youyo/memoria/internal/project"
 	"github.com/youyo/memoria/internal/queue"
+	"github.com/youyo/memoria/internal/retrieval"
 	"github.com/youyo/memoria/internal/worker"
 )
 
@@ -23,22 +26,154 @@ type HookCmd struct {
 	SessionEnd   HookSessionEndCmd   `cmd:"" name:"session-end" help:"セッション終了時の hook"`
 }
 
+// HookOutput は SessionStart / UserPromptSubmit hook の JSON 出力。
+type HookOutput struct {
+	HookSpecificOutput HookSpecificOutput `json:"hookSpecificOutput"`
+}
+
+// HookSpecificOutput は hook 固有の出力。
+type HookSpecificOutput struct {
+	HookEventName    string `json:"hookEventName"`
+	AdditionalContext string `json:"additionalContext"`
+}
+
+// writeHookOutput は HookOutput を w に JSON として書き出す。
+func writeHookOutput(w io.Writer, eventName, additionalContext string) error {
+	out := HookOutput{
+		HookSpecificOutput: HookSpecificOutput{
+			HookEventName:    eventName,
+			AdditionalContext: additionalContext,
+		},
+	}
+	enc := json.NewEncoder(w)
+	return enc.Encode(out)
+}
+
+// HookSessionStartInput は SessionStart hook の stdin JSON 入力。
+type HookSessionStartInput struct {
+	SessionID      string `json:"session_id"`
+	Cwd            string `json:"cwd"`
+	TranscriptPath string `json:"transcript_path"`
+	Source         string `json:"source"`
+}
+
 // HookSessionStartCmd は session-start hook コマンド。
 type HookSessionStartCmd struct{}
 
-// Run は session-start hook を実行する。
-func (c *HookSessionStartCmd) Run(globals *Globals, w *io.Writer) error {
-	fmt.Fprintln(*w, "not implemented")
-	return nil
+// Run は session-start hook を実行する（os.Stdin から読み取る）。
+func (c *HookSessionStartCmd) Run(globals *Globals, w *io.Writer, database *db.DB) error {
+	return c.RunWithReader(globals, *w, os.Stdin, database.SQL(), nil)
+}
+
+// RunWithReader はテスト可能な実装。
+// embedder が nil の場合は FTS only モードで動作する。
+func (c *HookSessionStartCmd) RunWithReader(globals *Globals, w io.Writer, reader io.Reader, sqlDB *sql.DB, embedder retrieval.Embedder) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
+	defer cancel()
+
+	var input HookSessionStartInput
+	if err := json.NewDecoder(reader).Decode(&input); err != nil {
+		fmt.Fprintf(os.Stderr, "memoria hook session-start: failed to decode stdin: %v\n", err)
+		// 失敗時も空の additionalContext を返す
+		return writeHookOutput(w, "SessionStart", "")
+	}
+
+	// Project 解決
+	resolver := project.NewResolver(sqlDB)
+	projectID, err := resolver.Resolve(ctx, input.Cwd)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "memoria hook session-start: failed to resolve project: %v\n", err)
+		if projectID == "" {
+			return writeHookOutput(w, "SessionStart", "")
+		}
+	}
+
+	// similar projects（M13 まではなし）
+	var similarProjects map[string]float64
+
+	// retrieval
+	r := retrieval.New(sqlDB, embedder)
+	results, err := r.SessionStart(ctx, projectID, similarProjects, 4)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "memoria hook session-start: retrieval error: %v\n", err)
+		return writeHookOutput(w, "SessionStart", "")
+	}
+
+	additionalContext := retrieval.FormatContext(results)
+	return writeHookOutput(w, "SessionStart", additionalContext)
+}
+
+// HookUserPromptInput は UserPromptSubmit hook の stdin JSON 入力。
+type HookUserPromptInput struct {
+	SessionID string `json:"session_id"`
+	Cwd       string `json:"cwd"`
+	Prompt    string `json:"prompt"`
 }
 
 // HookUserPromptCmd は user-prompt hook コマンド。
 type HookUserPromptCmd struct{}
 
-// Run は user-prompt hook を実行する。
-func (c *HookUserPromptCmd) Run(globals *Globals, w *io.Writer) error {
-	fmt.Fprintln(*w, "not implemented")
-	return nil
+// Run は user-prompt hook を実行する（os.Stdin から読み取る）。
+func (c *HookUserPromptCmd) Run(globals *Globals, w *io.Writer, database *db.DB, cfg *cfg_pkg.Config) error {
+	embedder := newEmbedderFromConfig(cfg)
+	return c.RunWithReader(globals, *w, os.Stdin, database.SQL(), embedder)
+}
+
+// RunWithReader はテスト可能な実装。
+// embedder が nil の場合は FTS only モードで動作する。
+func (c *HookUserPromptCmd) RunWithReader(globals *Globals, w io.Writer, reader io.Reader, sqlDB *sql.DB, embedder retrieval.Embedder) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
+	defer cancel()
+
+	var input HookUserPromptInput
+	if err := json.NewDecoder(reader).Decode(&input); err != nil {
+		fmt.Fprintf(os.Stderr, "memoria hook user-prompt: failed to decode stdin: %v\n", err)
+		return writeHookOutput(w, "UserPromptSubmit", "")
+	}
+
+	// Project 解決
+	resolver := project.NewResolver(sqlDB)
+	projectID, err := resolver.Resolve(ctx, input.Cwd)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "memoria hook user-prompt: failed to resolve project: %v\n", err)
+		if projectID == "" {
+			return writeHookOutput(w, "UserPromptSubmit", "")
+		}
+	}
+
+	// similar projects（M13 まではなし）
+	var similarProjects map[string]float64
+
+	// retrieval
+	r := retrieval.New(sqlDB, embedder)
+	results, err := r.UserPrompt(ctx, projectID, similarProjects, input.Prompt, 5)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "memoria hook user-prompt: retrieval error: %v\n", err)
+		return writeHookOutput(w, "UserPromptSubmit", "")
+	}
+
+	additionalContext := retrieval.FormatContext(results)
+	return writeHookOutput(w, "UserPromptSubmit", additionalContext)
+}
+
+// newEmbedderFromConfig は設定から embedding.Client を生成する。
+// embedding worker が利用できない場合は nil を返す（degraded mode）。
+func newEmbedderFromConfig(cfg *cfg_pkg.Config) retrieval.Embedder {
+	// UDS パスを解決
+	socketPath := embeddingSocketPath()
+	if socketPath == "" {
+		return nil
+	}
+	return embedding.New(socketPath)
+}
+
+// embeddingSocketPath は embedding worker の UDS パスを返す。
+// 環境変数 MEMORIA_EMBEDDING_SOCK が設定されている場合はそれを優先する。
+func embeddingSocketPath() string {
+	if v := os.Getenv("MEMORIA_EMBEDDING_SOCK"); v != "" {
+		return v
+	}
+	return cfg_pkg.SocketPath()
 }
 
 // HookStopInput は Stop hook の stdin JSON 入力。

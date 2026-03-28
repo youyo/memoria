@@ -115,13 +115,13 @@ M01 → M02 → M03 → M04 ──→ M05 → M06
 - [x] バッチ embedding
 - 📄 詳細: plans/memoria-m11-ingest-with-embedding.md
 
-### M12: SessionStart + UserPrompt retrieval (`retrieval-hooks`)
-- [ ] `memoria hook session-start` 実装
-- [ ] `memoria hook user-prompt` 実装
-- [ ] FTS + Vector + RRF 統合
-- [ ] Project boost
-- [ ] `config print-hook`
-- 📄 詳細: plans/memoria-m12-retrieval-hooks.md（着手時に生成）
+### M12: SessionStart + UserPrompt retrieval (`retrieval-hooks`) ✅
+- [x] `memoria hook session-start` 実装
+- [x] `memoria hook user-prompt` 実装
+- [x] FTS + Vector + RRF 統合
+- [x] Project boost
+- [x] `config print-hook`
+- 📄 詳細: plans/memoria-m12-retrieval-hooks.md
 
 ### M13: プロジェクト識別 + similarity (`project-fingerprint`)
 - [ ] Fingerprint 生成
