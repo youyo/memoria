@@ -113,11 +113,78 @@ func (c *HookStopCmd) RunWithReader(globals *Globals, w *io.Writer, reader io.Re
 	return nil
 }
 
+// HookSessionEndInput は SessionEnd hook の stdin JSON 入力。
+type HookSessionEndInput struct {
+	SessionID      string `json:"session_id"`
+	Cwd            string `json:"cwd"`
+	TranscriptPath string `json:"transcript_path"`
+	Reason         string `json:"reason"`
+}
+
+// SessionEndPayload は session_end_ingest ジョブの payload。
+type SessionEndPayload struct {
+	SessionID      string    `json:"session_id"`
+	ProjectID      string    `json:"project_id"`
+	Cwd            string    `json:"cwd"`
+	TranscriptPath string    `json:"transcript_path"`
+	Reason         string    `json:"reason"`
+	EnqueuedAt     time.Time `json:"enqueued_at"`
+}
+
 // HookSessionEndCmd は session-end hook コマンド。
 type HookSessionEndCmd struct{}
 
-// Run は session-end hook を実行する。
-func (c *HookSessionEndCmd) Run(globals *Globals, w *io.Writer) error {
-	fmt.Fprintln(*w, "not implemented")
+// Run は session-end hook を実行する（os.Stdin から読み取る）。
+func (c *HookSessionEndCmd) Run(globals *Globals, w *io.Writer, database *db.DB, q *queue.Queue) error {
+	return c.RunWithReader(globals, w, os.Stdin, database.SQL(), q)
+}
+
+// RunWithReader はテスト可能な実装。reader から stdin を読み取る。
+func (c *HookSessionEndCmd) RunWithReader(globals *Globals, w *io.Writer, reader io.Reader, sqlDB *sql.DB, q *queue.Queue) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 800*time.Millisecond)
+	defer cancel()
+
+	// 1. stdin デコード
+	var input HookSessionEndInput
+	if err := json.NewDecoder(reader).Decode(&input); err != nil {
+		fmt.Fprintf(os.Stderr, "memoria hook session-end: failed to decode stdin: %v\n", err)
+		return nil // exit 0
+	}
+
+	// 2. Project 解決
+	resolver := project.NewResolver(sqlDB)
+	projectID, err := resolver.Resolve(ctx, input.Cwd)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "memoria hook session-end: failed to resolve project: %v\n", err)
+		// best effort: project_id は部分的に取得できている可能性があるので継続
+		if projectID == "" {
+			return nil // exit 0
+		}
+	}
+
+	// 3. payload 構築 + enqueue
+	// transcript ファイルは読み込まず、パスのみ保存（M08 ingest worker が担当）
+	payload := SessionEndPayload{
+		SessionID:      input.SessionID,
+		ProjectID:      projectID,
+		Cwd:            input.Cwd,
+		TranscriptPath: input.TranscriptPath,
+		Reason:         input.Reason,
+		EnqueuedAt:     time.Now().UTC(),
+	}
+	payloadJSON, err := json.Marshal(payload)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "memoria hook session-end: failed to marshal payload: %v\n", err)
+		return nil // exit 0
+	}
+
+	if _, err := q.Enqueue(ctx, queue.JobTypeSessionEndIngest, string(payloadJSON)); err != nil {
+		fmt.Fprintf(os.Stderr, "memoria hook session-end: failed to enqueue: %v\n", err)
+		return nil // exit 0
+	}
+
+	// 4. ensureWorker（M07 まではスタブ）
+	worker.EnsureIngest(ctx)
+
 	return nil
 }

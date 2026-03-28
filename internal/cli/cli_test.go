@@ -221,7 +221,7 @@ func TestNotImplementedCommands(t *testing.T) {
 		{"hook", "session-start"},
 		{"hook", "user-prompt"},
 		// hook stop は M05 で本実装済みのため TestHookStop_* で検証
-		{"hook", "session-end"},
+		// hook session-end は M06 で本実装済みのため TestHookSessionEnd_* で検証
 		{"worker", "start"},
 		{"worker", "stop"},
 		{"worker", "restart"},
