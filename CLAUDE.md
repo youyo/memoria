@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **memoria** は Claude Code 向けのプロジェクト認識型ローカル RAG メモリシステム。コーディングセッションから意思決定・制約・失敗・TODO・知見を自動抽出し、SQLite にローカル蓄積する。
 
-現在は **M02 config-system 完了**。Kong CLI 骨格 + XDG パス解決 + config.toml 読み書き + config init/show/path コマンドが実装済み。
+現在は **M03 sqlite-schema 完了**。Kong CLI 骨格 + XDG パス解決 + config.toml 読み書き + config init/show/path コマンド + SQLite スキーマ + マイグレーション管理 + doctor コマンドが実装済み。
 
 ## ビルド・テスト・リント
 
@@ -119,14 +119,18 @@ plugin/memoria/
 
 インストール: `cp -r plugin/memoria ~/.claude/plugins/`
 
-## M02 からのハンドオフ（実装済み DI パターン）
+## M03 からのハンドオフ（実装済み DI パターン）
 
 - `Globals.ConfigPath string` (`--config` フラグ / `MEMORIA_CONFIG` 環境変数)
 - `*config.Config` は `kong.Bind(cfg)` で全コマンドの `Run()` に注入
 - `config.Load()` はファイル不在時に `DefaultConfig()` を返す（エラーなし）
 - `config.Save()` は一時ファイル + `os.Rename()` でアトミック書き込み
 - `internal/config` パッケージ: `paths.go`（XDG パス）と `config.go`（構造体・Load/Save）
-- GOPROXY=direct + GONOSUMDB="*" + GOMODCACHE=/tmp/claude/gomod ワークアラウンドが必要（TLS 証明書検証問題）
+- `*db.DB` は `kong.Bind(database)` で全コマンドの `Run()` に注入可能
+- `internal/db` パッケージ: `db.go`（Open/Close/Ping）と `migrate.go`（embed + 版数管理）
+- `internal/db/migrations/0001_initial.sql`: 全テーブル DDL（13テーブル + schema_migrations）
+- `modernc.org/sqlite v1.46.2`: CGo フリー SQLite ドライバ（FTS5 組み込み済み）
+- GOPATH=/Users/youyo で `go get` するとローカルキャッシュから取得可能（TLS 証明書検証問題の回避策）
 
 ## Worker 起動方針
 

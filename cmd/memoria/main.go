@@ -7,6 +7,7 @@ import (
 	"github.com/alecthomas/kong"
 	"github.com/youyo/memoria/internal/cli"
 	"github.com/youyo/memoria/internal/config"
+	"github.com/youyo/memoria/internal/db"
 )
 
 // ビルド時に -ldflags で埋め込む変数。
@@ -32,6 +33,16 @@ func main() {
 	// config パッケージの DI: *config.Config を Kong Bind で全コマンドに注入。
 	cfg := config.DefaultConfig()
 
+	// DB を開く（コマンド実行前に開くことで全コマンドへ DI 可能にする）
+	// M03 では doctor のみ DB を使用する。
+	database, err := db.Open(config.DBFile())
+	if err != nil {
+		// DB 初期化失敗は致命的エラー
+		os.Stderr.WriteString("fatal: " + err.Error() + "\n")
+		os.Exit(1)
+	}
+	defer database.Close()
+
 	ctx := kong.Parse(&c,
 		kong.Name("memoria"),
 		kong.Description("Claude Code 向けプロジェクト認識型ローカル RAG メモリシステム"),
@@ -39,6 +50,7 @@ func main() {
 		kong.Bind(info),
 		kong.Bind(&w),
 		kong.Bind(cfg),
+		kong.Bind(database),
 	)
 
 	// --config フラグが指定された場合は実際の設定ファイルをロードして cfg に反映する。
@@ -57,6 +69,6 @@ func main() {
 		*cfg = *loaded
 	}
 
-	err := ctx.Run(&c.Globals)
-	ctx.FatalIfErrorf(err)
+	runErr := ctx.Run(&c.Globals)
+	ctx.FatalIfErrorf(runErr)
 }

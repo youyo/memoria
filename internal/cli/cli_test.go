@@ -9,11 +9,17 @@ import (
 
 	"github.com/alecthomas/kong"
 	"github.com/youyo/memoria/internal/config"
+	"github.com/youyo/memoria/internal/db"
 )
 
 // parseForTest は Kong パーサーをテスト用に構成し、stdout をキャプチャして返す。
 // Kong の os.Exit を回避するため kong.New + parser.Parse を使用する。
 func parseForTest(t *testing.T, args []string) (stdout string, cli *CLI, err error) {
+	return parseForTestWithDB(t, args, nil)
+}
+
+// parseForTestWithDB は parseForTest に加え、*db.DB を Kong DI に注入できる拡張版。
+func parseForTestWithDB(t *testing.T, args []string, database *db.DB) (stdout string, cli *CLI, err error) {
 	t.Helper()
 
 	var c CLI
@@ -28,7 +34,7 @@ func parseForTest(t *testing.T, args []string) (stdout string, cli *CLI, err err
 	w := io.Writer(&buf)
 	cfg := config.DefaultConfig()
 
-	parser, newErr := kong.New(&c,
+	bindOpts := []kong.Option{
 		kong.Name("memoria"),
 		kong.Description("Claude Code 向けプロジェクト認識型ローカル RAG メモリシステム"),
 		kong.Writers(&buf, &buf),
@@ -38,7 +44,12 @@ func parseForTest(t *testing.T, args []string) (stdout string, cli *CLI, err err
 		kong.Exit(func(code int) {
 			// テスト中は os.Exit しない
 		}),
-	)
+	}
+	if database != nil {
+		bindOpts = append(bindOpts, kong.Bind(database))
+	}
+
+	parser, newErr := kong.New(&c, bindOpts...)
 	if newErr != nil {
 		return "", nil, newErr
 	}
@@ -201,8 +212,8 @@ func TestNoColorFlag(t *testing.T) {
 func TestNotImplementedCommands(t *testing.T) {
 	// config init/show/path は M02 で実装済みのため除外
 	// config print-hook は M12 で実装予定
+	// doctor は M03 で実装済みのため除外（doctor_test.go で専用テスト）
 	commands := [][]string{
-		{"doctor"},
 		{"hook", "session-start"},
 		{"hook", "user-prompt"},
 		{"hook", "stop"},
