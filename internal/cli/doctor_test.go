@@ -9,6 +9,148 @@ import (
 	"github.com/youyo/memoria/internal/db"
 )
 
+func TestDoctorCmd_IngestWorkerCheck(t *testing.T) {
+	stdout, _, err := doctorParseForTest(t, []string{"--format", "json", "doctor"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	var result struct {
+		Checks []struct {
+			Name string `json:"name"`
+			OK   bool   `json:"ok"`
+		} `json:"checks"`
+	}
+	if jsonErr := json.Unmarshal([]byte(stdout), &result); jsonErr != nil {
+		t.Fatalf("expected valid JSON: %v", jsonErr)
+	}
+
+	found := false
+	for _, check := range result.Checks {
+		if check.Name == "ingest_worker" {
+			found = true
+			// worker は起動していないのでokでなくても良い（チェック自体が存在することを確認）
+		}
+	}
+	if !found {
+		t.Errorf("expected ingest_worker check, not found in: %s", stdout)
+	}
+}
+
+func TestDoctorCmd_EmbeddingWorkerCheck(t *testing.T) {
+	stdout, _, err := doctorParseForTest(t, []string{"--format", "json", "doctor"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	var result struct {
+		Checks []struct {
+			Name string `json:"name"`
+		} `json:"checks"`
+	}
+	if jsonErr := json.Unmarshal([]byte(stdout), &result); jsonErr != nil {
+		t.Fatalf("expected valid JSON: %v", jsonErr)
+	}
+
+	found := false
+	for _, check := range result.Checks {
+		if check.Name == "embedding_worker" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected embedding_worker check, not found in: %s", stdout)
+	}
+}
+
+func TestDoctorCmd_ConfigValidCheck(t *testing.T) {
+	stdout, _, err := doctorParseForTest(t, []string{"--format", "json", "doctor"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	var result struct {
+		Checks []struct {
+			Name string `json:"name"`
+		} `json:"checks"`
+	}
+	if jsonErr := json.Unmarshal([]byte(stdout), &result); jsonErr != nil {
+		t.Fatalf("expected valid JSON: %v", jsonErr)
+	}
+
+	found := false
+	for _, check := range result.Checks {
+		if check.Name == "config_valid" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected config_valid check, not found in: %s", stdout)
+	}
+}
+
+func TestDoctorCmd_QueueDepthCheck(t *testing.T) {
+	stdout, _, err := doctorParseForTest(t, []string{"--format", "json", "doctor"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	var result struct {
+		Checks []struct {
+			Name string `json:"name"`
+			OK   bool   `json:"ok"`
+		} `json:"checks"`
+	}
+	if jsonErr := json.Unmarshal([]byte(stdout), &result); jsonErr != nil {
+		t.Fatalf("expected valid JSON: %v", jsonErr)
+	}
+
+	found := false
+	for _, check := range result.Checks {
+		if check.Name == "queue_depth" {
+			found = true
+			if !check.OK {
+				t.Error("expected queue_depth check to be ok for empty queue")
+			}
+		}
+	}
+	if !found {
+		t.Errorf("expected queue_depth check, not found in: %s", stdout)
+	}
+}
+
+func TestDoctorCmd_AllChecksPresent(t *testing.T) {
+	stdout, _, err := doctorParseForTest(t, []string{"--format", "json", "doctor"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	var result struct {
+		Checks []struct {
+			Name string `json:"name"`
+		} `json:"checks"`
+	}
+	if jsonErr := json.Unmarshal([]byte(stdout), &result); jsonErr != nil {
+		t.Fatalf("expected valid JSON: %v", jsonErr)
+	}
+
+	checkNames := make(map[string]bool)
+	for _, check := range result.Checks {
+		checkNames[check.Name] = true
+	}
+
+	required := []string{
+		"config_path", "data_dir", "state_dir", "db_file",
+		"db_connected", "pragma_wal", "pragma_foreign_keys", "fts_table",
+		"ingest_worker", "embedding_worker", "config_valid", "queue_depth",
+	}
+	for _, name := range required {
+		if !checkNames[name] {
+			t.Errorf("expected check %q to be present in: %s", name, stdout)
+		}
+	}
+}
+
 // doctorParseForTest は tmp ディレクトリに DB を作成して doctor コマンドを実行するヘルパー。
 func doctorParseForTest(t *testing.T, args []string) (string, *CLI, error) {
 	t.Helper()

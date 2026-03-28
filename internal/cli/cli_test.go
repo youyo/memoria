@@ -224,8 +224,7 @@ func TestNotImplementedCommands(t *testing.T) {
 	// doctor は M03 で実装済みのため除外（doctor_test.go で専用テスト）
 	commands := [][]string{
 		{"worker", "restart"},
-		{"memory", "list"},
-		{"memory", "stats"},
+		// memory list/stats は *db.DB DI が必要なため TestMemoryList_*/TestMemoryStats_* で別途検証
 		// memory reindex は *db.DB DI が必要なため TestMemoryReindex_* で別途検証
 		{"completion", "bash"},
 		{"completion", "zsh"},

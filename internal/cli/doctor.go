@@ -1,12 +1,16 @@
 package cli
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
+	"os"
+	"time"
 
 	cfg_pkg "github.com/youyo/memoria/internal/config"
 	"github.com/youyo/memoria/internal/db"
+	"github.com/youyo/memoria/internal/worker"
 )
 
 // DoctorCheck は1つの診断チェック結果を表す。
@@ -119,6 +123,78 @@ func (c *DoctorCmd) Run(globals *Globals, w *io.Writer, database *db.DB) error {
 		ftsCheck.Detail = "chunks_fts exists"
 	}
 	result.Checks = append(result.Checks, ftsCheck)
+
+	// --- Ingest worker 状態確認 ---
+	ingestCheck := DoctorCheck{Name: "ingest_worker"}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	liveness, lease, livenessErr := worker.CheckLiveness(ctx, database.SQL(), worker.WorkerNameIngest)
+	if livenessErr != nil {
+		ingestCheck.OK = false
+		ingestCheck.Detail = fmt.Sprintf("check failed: %v", livenessErr)
+	} else {
+		switch liveness {
+		case worker.LivenessAlive:
+			ingestCheck.OK = true
+			if lease != nil {
+				ingestCheck.Detail = fmt.Sprintf("alive (pid=%d, worker_id=%s)", lease.PID, lease.WorkerID)
+			} else {
+				ingestCheck.Detail = "alive"
+			}
+		case worker.LivenessSuspect:
+			ingestCheck.OK = false
+			ingestCheck.Detail = "suspect (heartbeat delayed)"
+		case worker.LivenessStale:
+			ingestCheck.OK = false
+			ingestCheck.Detail = "stale (no recent heartbeat)"
+		case worker.LivenessNotRunning:
+			ingestCheck.OK = false
+			ingestCheck.Detail = "not running"
+		}
+	}
+	result.Checks = append(result.Checks, ingestCheck)
+
+	// --- Embedding worker 状態確認（ソケットファイルの存在確認のみ）---
+	embeddingCheck := DoctorCheck{Name: "embedding_worker"}
+	socketPath := cfg_pkg.SocketPath()
+	if _, statErr := os.Stat(socketPath); statErr == nil {
+		embeddingCheck.OK = true
+		embeddingCheck.Detail = fmt.Sprintf("socket exists: %s", socketPath)
+	} else {
+		embeddingCheck.OK = false
+		embeddingCheck.Detail = fmt.Sprintf("socket not found: %s", socketPath)
+	}
+	result.Checks = append(result.Checks, embeddingCheck)
+
+	// --- Config 検証 ---
+	configCheck := DoctorCheck{Name: "config_valid"}
+	if _, statErr := os.Stat(configPath); os.IsNotExist(statErr) {
+		// 設定ファイルが存在しない場合はデフォルト値を使用するので OK
+		configCheck.OK = true
+		configCheck.Detail = "not found (using defaults)"
+	} else {
+		if _, loadErr := cfg_pkg.Load(configPath); loadErr != nil {
+			configCheck.OK = false
+			configCheck.Detail = fmt.Sprintf("parse error: %v", loadErr)
+			result.OK = false
+		} else {
+			configCheck.OK = true
+			configCheck.Detail = fmt.Sprintf("valid: %s", configPath)
+		}
+	}
+	result.Checks = append(result.Checks, configCheck)
+
+	// --- Queue depth 確認 ---
+	queueCheck := DoctorCheck{Name: "queue_depth"}
+	var queueDepth int
+	if qErr := database.SQL().QueryRowContext(ctx, "SELECT COUNT(*) FROM jobs WHERE status = 'queued'").Scan(&queueDepth); qErr != nil {
+		queueCheck.OK = false
+		queueCheck.Detail = fmt.Sprintf("query failed: %v", qErr)
+	} else {
+		queueCheck.OK = true
+		queueCheck.Detail = fmt.Sprintf("queued=%d", queueDepth)
+	}
+	result.Checks = append(result.Checks, queueCheck)
 
 	// --- 出力 ---
 	switch globals.Format {

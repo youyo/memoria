@@ -1,0 +1,62 @@
+version: 2
+
+project_name: memoria
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: memoria
+    main: ./cmd/memoria
+    binary: memoria
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - darwin
+      - linux
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w
+      - -X main.version={{.Version}}
+      - -X main.commit={{.Commit}}
+      - -X main.date={{.Date}}
+
+archives:
+  - id: memoria
+    format: tar.gz
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    files:
+      - README.md
+      - README.ja.md
+      - LICENSE*
+      - plugin/**
+
+checksum:
+  name_template: "{{ .ProjectName }}_{{ .Version }}_checksums.txt"
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^chore:"
+      - Merge pull request
+      - Merge branch
+
+brews:
+  - name: memoria
+    repository:
+      owner: youyo
+      name: homebrew-tap
+      token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
+    homepage: "https://github.com/youyo/memoria"
+    description: "Claude Code 向けプロジェクト認識型ローカル RAG メモリシステム"
+    license: "MIT"
+    test: |
+      system "#{bin}/memoria version"
+    install: |
+      bin.install "memoria"

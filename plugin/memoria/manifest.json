@@ -1,0 +1,19 @@
+{
+  "name": "memoria",
+  "version": "0.1.0",
+  "description": "Claude Code 向けプロジェクト認識型ローカル RAG メモリシステム",
+  "hooks": {
+    "SessionStart": {
+      "command": "memoria hook session-start"
+    },
+    "UserPromptSubmit": {
+      "command": "memoria hook user-prompt"
+    },
+    "Stop": {
+      "command": "memoria hook stop"
+    },
+    "SessionEnd": {
+      "command": "memoria hook session-end"
+    }
+  }
+}

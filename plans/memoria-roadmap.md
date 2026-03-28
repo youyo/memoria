@@ -136,13 +136,13 @@ M01 → M02 → M03 → M04 ──→ M05 → M06
 - [x] `memoria memory reindex` コマンド実装（batch / dry-run 対応）
 - 📄 詳細: plans/memoria-m14-sqlite-vec-upgrade.md
 
-### M15: Plugin + Release engineering (`release-packaging`)
-- [ ] Plugin manifest + Skill 最終版
-- [ ] `doctor` 完全版
-- [ ] `memory search/get/list/stats`
-- [ ] GoReleaser + Homebrew tap
-- [ ] CI/CD (GitHub Actions)
-- 📄 詳細: plans/memoria-m15-release-packaging.md（着手時に生成）
+### M15: Plugin + Release engineering (`release-packaging`) ✅
+- [x] Plugin manifest 最終版（`plugin/memoria/manifest.json`）
+- [x] `doctor` 完全版（ingest/embedding worker 状態 + config 検証 + queue depth）
+- [x] `memory search/get/list/stats` 本実装
+- [x] GoReleaser 設定（`.goreleaser.yml`）
+- [x] CI/CD (GitHub Actions)（`.github/workflows/test.yml` / `.github/workflows/release.yml`）
+- 📄 詳細: plans/memoria-m15-release-packaging.md
 
 ## Blockers
 

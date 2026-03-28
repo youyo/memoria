@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"os"
 
 	"github.com/youyo/memoria/internal/db"
 	"github.com/youyo/memoria/internal/retrieval"
@@ -22,42 +23,289 @@ type MemoryCmd struct {
 
 // MemorySearchCmd は memory search コマンド。
 type MemorySearchCmd struct {
-	Query string `arg:"" help:"検索クエリ"`
+	Query   string `arg:"" help:"検索クエリ"`
+	Limit   int    `help:"最大件数" default:"10" short:"n"`
+	Project string `help:"プロジェクト ID でフィルタ" optional:""`
+	Kind    string `help:"kind でフィルタ (decision/constraint/todo/failure/fact/preference/pattern)" optional:""`
 }
 
 // Run は memory search を実行する。
-func (c *MemorySearchCmd) Run(globals *Globals, w *io.Writer) error {
-	fmt.Fprintln(*w, "not implemented")
-	return nil
+func (c *MemorySearchCmd) Run(globals *Globals, w *io.Writer, database *db.DB) error {
+	ctx := context.Background()
+
+	ret := retrieval.New(database.SQL(), nil) // embedder nil = FTS only
+	ftsResults, err := ret.FTSSearch(ctx, c.Query, c.Limit*3)
+	if err != nil {
+		return fmt.Errorf("fts search: %w", err)
+	}
+
+	// フィルタ適用
+	var results []retrieval.Result
+	for _, rr := range ftsResults {
+		r := retrieval.Result{
+			ChunkID:    rr.ID,
+			Content:    rr.Content,
+			Summary:    rr.Summary,
+			Kind:       rr.Kind,
+			Importance: rr.Importance,
+			Scope:      rr.Scope,
+			ProjectID:  rr.ProjectID,
+			CreatedAt:  rr.CreatedAt,
+			Score:      rr.Score,
+		}
+		if c.Kind != "" && r.Kind != c.Kind {
+			continue
+		}
+		if c.Project != "" && r.ProjectID != c.Project {
+			continue
+		}
+		results = append(results, r)
+		if len(results) >= c.Limit {
+			break
+		}
+	}
+	if results == nil {
+		results = []retrieval.Result{}
+	}
+
+	switch globals.Format {
+	case "json":
+		enc := json.NewEncoder(*w)
+		enc.SetIndent("", "  ")
+		return enc.Encode(results)
+	default:
+		if len(results) == 0 {
+			fmt.Fprintln(*w, "no results")
+			return nil
+		}
+		for _, r := range results {
+			text := r.Summary
+			if text == "" {
+				text = r.Content
+			}
+			if len(text) > 100 {
+				text = text[:100] + "..."
+			}
+			fmt.Fprintf(*w, "[%s] score:%.3f | %s\n", r.Kind, r.Score, text)
+		}
+		return nil
+	}
+}
+
+// ChunkDetail は memory get の出力構造体。
+type ChunkDetail struct {
+	ChunkID    string  `json:"chunk_id"`
+	ProjectID  string  `json:"project_id"`
+	Content    string  `json:"content"`
+	Summary    string  `json:"summary,omitempty"`
+	Kind       string  `json:"kind"`
+	Importance float64 `json:"importance"`
+	Scope      string  `json:"scope"`
+	CreatedAt  string  `json:"created_at"`
 }
 
 // MemoryGetCmd は memory get コマンド。
 type MemoryGetCmd struct {
-	ID string `arg:"" help:"メモリ ID"`
+	ID string `arg:"" help:"メモリ ID (chunk_id)"`
 }
 
 // Run は memory get を実行する。
-func (c *MemoryGetCmd) Run(globals *Globals, w *io.Writer) error {
-	fmt.Fprintln(*w, "not implemented")
-	return nil
+func (c *MemoryGetCmd) Run(globals *Globals, w *io.Writer, database *db.DB) error {
+	ctx := context.Background()
+
+	const query = `
+SELECT chunk_id, project_id, content, COALESCE(summary,''), kind, importance, scope, created_at
+FROM chunks
+WHERE chunk_id = ?`
+
+	var chunk ChunkDetail
+	err := database.SQL().QueryRowContext(ctx, query, c.ID).Scan(
+		&chunk.ChunkID,
+		&chunk.ProjectID,
+		&chunk.Content,
+		&chunk.Summary,
+		&chunk.Kind,
+		&chunk.Importance,
+		&chunk.Scope,
+		&chunk.CreatedAt,
+	)
+	if err == sql.ErrNoRows {
+		switch globals.Format {
+		case "json":
+			fmt.Fprintln(*w, `{"error":"not found","chunk_id":"`+c.ID+`"}`)
+		default:
+			fmt.Fprintf(*w, "not found: %s\n", c.ID)
+		}
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("query chunk: %w", err)
+	}
+
+	switch globals.Format {
+	case "json":
+		enc := json.NewEncoder(*w)
+		enc.SetIndent("", "  ")
+		return enc.Encode(chunk)
+	default:
+		fmt.Fprintf(*w, "chunk_id:   %s\n", chunk.ChunkID)
+		fmt.Fprintf(*w, "project_id: %s\n", chunk.ProjectID)
+		fmt.Fprintf(*w, "kind:       %s\n", chunk.Kind)
+		fmt.Fprintf(*w, "importance: %.2f\n", chunk.Importance)
+		fmt.Fprintf(*w, "scope:      %s\n", chunk.Scope)
+		fmt.Fprintf(*w, "created_at: %s\n", chunk.CreatedAt)
+		if chunk.Summary != "" {
+			fmt.Fprintf(*w, "summary:    %s\n", chunk.Summary)
+		}
+		fmt.Fprintf(*w, "content:\n%s\n", chunk.Content)
+		return nil
+	}
 }
 
 // MemoryListCmd は memory list コマンド。
-type MemoryListCmd struct{}
+type MemoryListCmd struct {
+	Limit   int    `help:"最大件数" default:"20" short:"n"`
+	Project string `help:"プロジェクト ID でフィルタ" optional:""`
+	Kind    string `help:"kind でフィルタ (decision/constraint/todo/failure/fact/preference/pattern)" optional:""`
+}
 
 // Run は memory list を実行する。
-func (c *MemoryListCmd) Run(globals *Globals, w *io.Writer) error {
-	fmt.Fprintln(*w, "not implemented")
-	return nil
+func (c *MemoryListCmd) Run(globals *Globals, w *io.Writer, database *db.DB) error {
+	ctx := context.Background()
+
+	query := `SELECT chunk_id, project_id, content, COALESCE(summary,''), kind, importance, scope, created_at FROM chunks`
+	var args []interface{}
+	var conditions []string
+
+	if c.Project != "" {
+		conditions = append(conditions, "project_id = ?")
+		args = append(args, c.Project)
+	}
+	if c.Kind != "" {
+		conditions = append(conditions, "kind = ?")
+		args = append(args, c.Kind)
+	}
+
+	if len(conditions) > 0 {
+		query += " WHERE "
+		for i, cond := range conditions {
+			if i > 0 {
+				query += " AND "
+			}
+			query += cond
+		}
+	}
+	query += " ORDER BY created_at DESC LIMIT ?"
+	args = append(args, c.Limit)
+
+	rows, err := database.SQL().QueryContext(ctx, query, args...)
+	if err != nil {
+		return fmt.Errorf("list chunks: %w", err)
+	}
+	defer rows.Close()
+
+	var chunks []ChunkDetail
+	for rows.Next() {
+		var chunk ChunkDetail
+		if err := rows.Scan(
+			&chunk.ChunkID,
+			&chunk.ProjectID,
+			&chunk.Content,
+			&chunk.Summary,
+			&chunk.Kind,
+			&chunk.Importance,
+			&chunk.Scope,
+			&chunk.CreatedAt,
+		); err != nil {
+			return fmt.Errorf("scan chunk: %w", err)
+		}
+		chunks = append(chunks, chunk)
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("rows error: %w", err)
+	}
+	if chunks == nil {
+		chunks = []ChunkDetail{}
+	}
+
+	switch globals.Format {
+	case "json":
+		enc := json.NewEncoder(*w)
+		enc.SetIndent("", "  ")
+		return enc.Encode(chunks)
+	default:
+		if len(chunks) == 0 {
+			fmt.Fprintln(*w, "no chunks")
+			return nil
+		}
+		for _, chunk := range chunks {
+			text := chunk.Summary
+			if text == "" {
+				text = chunk.Content
+			}
+			if len(text) > 80 {
+				text = text[:80] + "..."
+			}
+			fmt.Fprintf(*w, "%s [%s] %s\n", chunk.ChunkID[:8], chunk.Kind, text)
+		}
+		return nil
+	}
+}
+
+// MemoryStatsOutput は memory stats の出力構造体。
+type MemoryStatsOutput struct {
+	ChunksTotal   int    `json:"chunks_total"`
+	SessionsTotal int    `json:"sessions_total"`
+	JobsPending   int    `json:"jobs_pending"`
+	DBSizeBytes   int64  `json:"db_size_bytes"`
+	DBPath        string `json:"db_path"`
 }
 
 // MemoryStatsCmd は memory stats コマンド。
 type MemoryStatsCmd struct{}
 
 // Run は memory stats を実行する。
-func (c *MemoryStatsCmd) Run(globals *Globals, w *io.Writer) error {
-	fmt.Fprintln(*w, "not implemented")
-	return nil
+func (c *MemoryStatsCmd) Run(globals *Globals, w *io.Writer, database *db.DB) error {
+	ctx := context.Background()
+	sqlDB := database.SQL()
+	dbPath := database.Path()
+
+	var out MemoryStatsOutput
+	out.DBPath = dbPath
+
+	// chunks 件数
+	if err := sqlDB.QueryRowContext(ctx, "SELECT COUNT(*) FROM chunks").Scan(&out.ChunksTotal); err != nil {
+		out.ChunksTotal = 0
+	}
+
+	// sessions 件数
+	if err := sqlDB.QueryRowContext(ctx, "SELECT COUNT(*) FROM sessions").Scan(&out.SessionsTotal); err != nil {
+		out.SessionsTotal = 0
+	}
+
+	// jobs queued 件数
+	if err := sqlDB.QueryRowContext(ctx, "SELECT COUNT(*) FROM jobs WHERE status = 'queued'").Scan(&out.JobsPending); err != nil {
+		out.JobsPending = 0
+	}
+
+	// DB ファイルサイズ
+	if fi, err := os.Stat(dbPath); err == nil {
+		out.DBSizeBytes = fi.Size()
+	}
+
+	switch globals.Format {
+	case "json":
+		enc := json.NewEncoder(*w)
+		enc.SetIndent("", "  ")
+		return enc.Encode(out)
+	default:
+		fmt.Fprintf(*w, "chunks_total:   %d\n", out.ChunksTotal)
+		fmt.Fprintf(*w, "sessions_total: %d\n", out.SessionsTotal)
+		fmt.Fprintf(*w, "jobs_pending:   %d\n", out.JobsPending)
+		fmt.Fprintf(*w, "db_size_bytes:  %d\n", out.DBSizeBytes)
+		fmt.Fprintf(*w, "db_path:        %s\n", out.DBPath)
+		return nil
+	}
 }
 
 // MemoryReindexCmd は memory reindex コマンド。
