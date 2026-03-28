@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **memoria** は Claude Code 向けのプロジェクト認識型ローカル RAG メモリシステム。コーディングセッションから意思決定・制約・失敗・TODO・知見を自動抽出し、SQLite にローカル蓄積する。
 
-現在は **M08 ingest-worker-loop 完了**。Kong CLI 骨格 + XDG パス解決 + config.toml 読み書き + config init/show/path コマンド + SQLite スキーマ + マイグレーション管理 + doctor コマンド + SQLite ベースジョブキュー（Enqueue/Dequeue/Ack/Fail/Purge/Stats）+ `memoria hook stop`（checkpoint_ingest enqueue + project ID 解決）+ `memoria hook session-end`（session_end_ingest enqueue + transcript_path 保存）+ ingest worker ライフサイクル管理（daemon ingest / worker start/stop/status / heartbeat / lease / flock / EnsureIngest 本実装）+ **ingest worker ジョブ処理ループ**（checkpoint_ingest / session_end_ingest 処理 / transcript パーサー / chunker / ヒューリスティック enrichment / chunks/sessions/turns DB 書き込み / SHA-256 重複排除 / FTS5 自動同期）が実装済み。
+現在は **M09 embedding-worker 完了**。Kong CLI 骨格 + XDG パス解決 + config.toml 読み書き + config init/show/path コマンド + SQLite スキーマ + マイグレーション管理 + doctor コマンド + SQLite ベースジョブキュー（Enqueue/Dequeue/Ack/Fail/Purge/Stats）+ `memoria hook stop`（checkpoint_ingest enqueue + project ID 解決）+ `memoria hook session-end`（session_end_ingest enqueue + transcript_path 保存）+ ingest worker ライフサイクル管理（daemon ingest / worker start/stop/status / heartbeat / lease / flock / EnsureIngest 本実装）+ ingest worker ジョブ処理ループ（checkpoint_ingest / session_end_ingest 処理 / transcript パーサー / chunker / ヒューリスティック enrichment / chunks/sessions/turns DB 書き込み / SHA-256 重複排除 / FTS5 自動同期）+ **Python embedding worker**（FastAPI + sentence-transformers Ruri v3 / Unix Domain Socket / /embed + /health エンドポイント / idle timeout / PID・lock ファイル管理）が実装済み。
 
 ## ビルド・テスト・リント
 
@@ -27,7 +27,7 @@ go vet ./...
 # クリーン
 make clean
 
-# Python embedding worker（予定）
+# Python embedding worker
 uv run python/worker.py
 ```
 
@@ -118,6 +118,18 @@ plugin/memoria/
 ```
 
 インストール: `cp -r plugin/memoria ~/.claude/plugins/`
+
+## M09 からのハンドオフ（実装済み Python embedding worker）
+
+- `python/worker.py`: エントリポイント（argparse: `--uds`, `--model`, `--preload`, `--timeout`, `--pid-file`, `--lock-file`）
+- `python/app/main.py`: `create_app(model_name, preload, idle_timeout)` — FastAPI アプリファクトリ、lifespan で preload + IdleTimer 起動
+- `python/app/model.py`: `ModelManager` — SentenceTransformer ラッパー、`preload()` / `embed()` / `embed_async()` / `status()`
+- `python/app/schemas.py`: `EmbedRequest` / `EmbedResponse` / `HealthResponse` — Pydantic v2 スキーマ（texts: 1〜64件バリデーション）
+- `python/app/lifecycle.py`: `IdleTimer` / `PidFileManager` / `LockManager` — idle timeout・PID ファイル・flock ロック
+- `python/pyproject.toml`: fastapi, uvicorn, sentence-transformers, httpx, pytest 等の依存定義
+- エンドポイント: `POST /embed`（EmbedRequest → EmbedResponse）/ `GET /health`（HealthResponse）
+- Unix Domain Socket: uvicorn `--uds` で起動（ingest worker と UDS 通信）
+- テスト: `python/tests/` 50 テスト全 green（asgi_lifespan + httpx AsyncClient + MagicMock）
 
 ## M08 からのハンドオフ（実装済み ingest worker ジョブ処理ループ）
 
