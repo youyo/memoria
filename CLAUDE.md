@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **memoria** は Claude Code 向けのプロジェクト認識型ローカル RAG メモリシステム。コーディングセッションから意思決定・制約・失敗・TODO・知見を自動抽出し、SQLite にローカル蓄積する。
 
-現在は **M13 project-fingerprint 完了**。Kong CLI 骨格 + XDG パス解決 + config.toml 読み書き + config init/show/path コマンド + SQLite スキーマ + マイグレーション管理 + doctor コマンド + SQLite ベースジョブキュー（Enqueue/Dequeue/Ack/Fail/Purge/Stats）+ `memoria hook stop`（checkpoint_ingest enqueue + project ID 解決）+ `memoria hook session-end`（session_end_ingest enqueue + transcript_path 保存）+ ingest worker ライフサイクル管理（daemon ingest / worker start/stop/status / heartbeat / lease / flock / EnsureIngest 本実装）+ ingest worker ジョブ処理ループ（checkpoint_ingest / session_end_ingest 処理 / transcript パーサー / chunker / ヒューリスティック enrichment / chunks/sessions/turns DB 書き込み / SHA-256 重複排除 / FTS5 自動同期）+ **Python embedding worker**（FastAPI + sentence-transformers Ruri v3 / Unix Domain Socket / /embed + /health エンドポイント / idle timeout / PID・lock ファイル管理）+ **Go ↔ Python UDS 通信統合**（internal/embedding.Client / EnsureEmbedding / worker start+stop+status embedding 対応）+ **Ingest に embedding 統合**（chunk 保存後に自動 embedding / chunk_embeddings 保存 / バッチ embedding / embedding worker 未起動時フォールバック）+ **SessionStart/UserPrompt retrieval hooks**（`memoria hook session-start` / `memoria hook user-prompt` / FTS5+Vector+RRF+project boost / `config print-hook`）+ **プロジェクト識別 + similarity（M13）**（fingerprint 生成 / TTL 管理 / project_refresh / project_similarity_refresh background job / hook 統合）が実装済み。
+現在は **M14 sqlite-vec-upgrade 完了**。Kong CLI 骨格 + XDG パス解決 + config.toml 読み書き + config init/show/path コマンド + SQLite スキーマ + マイグレーション管理 + doctor コマンド + SQLite ベースジョブキュー（Enqueue/Dequeue/Ack/Fail/Purge/Stats）+ `memoria hook stop`（checkpoint_ingest enqueue + project ID 解決）+ `memoria hook session-end`（session_end_ingest enqueue + transcript_path 保存）+ ingest worker ライフサイクル管理（daemon ingest / worker start/stop/status / heartbeat / lease / flock / EnsureIngest 本実装）+ ingest worker ジョブ処理ループ（checkpoint_ingest / session_end_ingest 処理 / transcript パーサー / chunker / ヒューリスティック enrichment / chunks/sessions/turns DB 書き込み / SHA-256 重複排除 / FTS5 自動同期）+ **Python embedding worker**（FastAPI + sentence-transformers Ruri v3 / Unix Domain Socket / /embed + /health エンドポイント / idle timeout / PID・lock ファイル管理）+ **Go ↔ Python UDS 通信統合**（internal/embedding.Client / EnsureEmbedding / worker start+stop+status embedding 対応）+ **Ingest に embedding 統合**（chunk 保存後に自動 embedding / chunk_embeddings 保存 / バッチ embedding / embedding worker 未起動時フォールバック）+ **SessionStart/UserPrompt retrieval hooks**（`memoria hook session-start` / `memoria hook user-prompt` / FTS5+Vector+RRF+project boost / `config print-hook`）+ **プロジェクト識別 + similarity（M13）**（fingerprint 生成 / TTL 管理 / project_refresh / project_similarity_refresh background job / hook 統合）+ **ベクトル検索最適化 + memory reindex（M14）**（float32 バイナリ blob 形式 / vectorSearch blob 高速パス / JSON フォールバック / `memoria memory reindex` コマンド）が実装済み。
 
 ## ビルド・テスト・リント
 
@@ -118,6 +118,28 @@ plugin/memoria/
 ```
 
 インストール: `cp -r plugin/memoria ~/.claude/plugins/`
+
+## M14 からのハンドオフ（実装済み ベクトル検索最適化 + memory reindex）
+
+- `internal/retrieval/vector.go`: `Float32SliceToBytes(vec)` / `BytesToFloat32Slice(b)` — float32 ↔ little-endian バイナリ変換
+- `internal/retrieval/retrieval.go`: `vectorSearch()` — embedding_blob が存在する場合はバイナリ高速パス（JSON フォールバック付き）
+  - LIMIT 200 → 500 に拡張
+  - blob デコードは JSON パース（55,729 ns）より約 83 倍高速（669 ns @ 768 dim、Apple M4 計測）
+- `internal/ingest/embedder.go`: `EmbedChunks()` — 新規 embedding 保存時に JSON + blob の両形式で INSERT
+- `internal/cli/memory.go`: `MemoryReindexCmd.Run()` — `memoria memory reindex [--batch-size N] [--dry-run]`
+  - `reindexChunkEmbeddings(ctx, db, batchSize, dryRun)` — chunk_embeddings の JSON → blob 変換
+  - `reindexProjectEmbeddings(ctx, db, batchSize, dryRun)` — project_embeddings の JSON → blob 変換
+  - バッチ処理（デフォルト 100 件）/ dry-run モード / 冪等（既 blob 行はスキップ）
+- `internal/db/migrations/0002_embedding_blob.sql`: `chunk_embeddings.embedding_blob BLOB` / `project_embeddings.embedding_blob BLOB` カラム追加
+- SQLite スキーマバージョン: 2
+
+### M14 アーキテクチャ決定
+
+| # | 決定 | 理由 |
+|---|------|------|
+| 1 | sqlite-vec は採用しない（M14） | `modernc.org/sqlite`（Pure Go）は C 拡張不可。mattn/go-sqlite3（CGO）移行は配布性低下のため M14 では見送り |
+| 2 | float32 バイナリ blob で最適化 | JSON パースを排除しデコードを 83 倍高速化。embedding_json は後方互換として維持 |
+| 3 | vectorSearch LIMIT を 500 に拡張 | blob 化によりパフォーマンス余裕ができたため検索候補数を増加 |
 
 ## M13 からのハンドオフ（実装済み プロジェクト識別 + similarity）
 

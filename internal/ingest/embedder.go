@@ -5,6 +5,8 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+
+	"github.com/youyo/memoria/internal/retrieval"
 )
 
 // EmbedClient は embedding worker への通信インターフェース。
@@ -82,18 +84,19 @@ func (e *ChunkEmbedder) EmbedChunks(ctx context.Context, db *sql.DB, chunkIDs []
 		return fmt.Errorf("embedding count mismatch: expected %d, got %d", len(orderedIDs), len(embeddings))
 	}
 
-	// 結果を chunk_embeddings に保存
+	// 結果を chunk_embeddings に保存（JSON + blob の両形式で保存）
 	for i, chunkID := range orderedIDs {
 		jsonBytes, err := json.Marshal(embeddings[i])
 		if err != nil {
 			return fmt.Errorf("marshal embedding for chunk %s: %w", chunkID, err)
 		}
+		blob := retrieval.Float32SliceToBytes(embeddings[i])
 
 		const insertQuery = `
-INSERT OR IGNORE INTO chunk_embeddings (chunk_id, model, embedding_json, created_at)
-VALUES (?, ?, ?, strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))`
+INSERT OR IGNORE INTO chunk_embeddings (chunk_id, model, embedding_json, embedding_blob, created_at)
+VALUES (?, ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))`
 
-		if _, err := db.ExecContext(ctx, insertQuery, chunkID, modelName, string(jsonBytes)); err != nil {
+		if _, err := db.ExecContext(ctx, insertQuery, chunkID, modelName, string(jsonBytes), blob); err != nil {
 			return fmt.Errorf("insert chunk_embedding for chunk %s: %w", chunkID, err)
 		}
 	}

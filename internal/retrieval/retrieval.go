@@ -214,6 +214,8 @@ LIMIT ?`
 }
 
 // vectorSearch は embedding を使って cosine similarity 検索を行う。
+// embedding_blob が存在する場合はバイナリ高速パスを使用し、
+// ない場合は embedding_json からの JSON パースにフォールバックする。
 func (r *Retriever) vectorSearch(ctx context.Context, query string, limit int) ([]RankedResult, error) {
 	// prompt を embed
 	vecs, err := r.embedder.Embed(ctx, []string{query})
@@ -225,14 +227,14 @@ func (r *Retriever) vectorSearch(ctx context.Context, query string, limit int) (
 	}
 	queryVec := vecs[0]
 
-	// chunk_embeddings を全件取得して Go 側で cosine similarity を計算
-	// M14 で sqlite-vec に切り替える予定
+	// chunk_embeddings を取得して Go 側で cosine similarity を計算
+	// embedding_blob が存在する場合はバイナリ高速パス、なければ JSON フォールバック
 	const sqlQuery = `
 SELECT c.chunk_id, c.content, c.summary, c.kind, c.importance, c.scope, c.project_id, c.created_at,
-       ce.embedding_json
+       ce.embedding_blob, ce.embedding_json
 FROM chunks c
 JOIN chunk_embeddings ce ON c.chunk_id = ce.chunk_id
-LIMIT 200`
+LIMIT 500`
 
 	rows, err := r.db.QueryContext(ctx, sqlQuery)
 	if err != nil {
@@ -241,7 +243,8 @@ LIMIT 200`
 	defer rows.Close()
 
 	type candidate struct {
-		rr          RankedResult
+		rr            RankedResult
+		embeddingBlob []byte
 		embeddingJSON string
 	}
 
@@ -249,13 +252,17 @@ LIMIT 200`
 	for rows.Next() {
 		var c candidate
 		var summary sql.NullString
+		var blob []byte
+		var embJSON string
 		if err := rows.Scan(
 			&c.rr.ID, &c.rr.Content, &summary, &c.rr.Kind, &c.rr.Importance, &c.rr.Scope, &c.rr.ProjectID, &c.rr.CreatedAt,
-			&c.embeddingJSON,
+			&blob, &embJSON,
 		); err != nil {
 			return nil, fmt.Errorf("scan vector row: %w", err)
 		}
 		c.rr.Summary = summary.String
+		c.embeddingBlob = blob
+		c.embeddingJSON = embJSON
 		candidates = append(candidates, c)
 	}
 	if err := rows.Err(); err != nil {
@@ -264,8 +271,18 @@ LIMIT 200`
 
 	// cosine similarity を計算
 	for i := range candidates {
-		vec, err := parseFloat32Slice(candidates[i].embeddingJSON)
-		if err != nil {
+		var vec []float32
+		var parseErr error
+
+		if len(candidates[i].embeddingBlob) > 0 {
+			// 高速パス: バイナリデコード
+			vec, parseErr = BytesToFloat32Slice(candidates[i].embeddingBlob)
+		} else {
+			// フォールバック: JSON パース（後方互換）
+			vec, parseErr = parseFloat32Slice(candidates[i].embeddingJSON)
+		}
+
+		if parseErr != nil || len(vec) == 0 {
 			continue
 		}
 		candidates[i].rr.Score = float64(CosineSimilarity(queryVec, vec))

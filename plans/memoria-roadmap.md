@@ -129,12 +129,12 @@ M01 → M02 → M03 → M04 ──→ M05 → M06
 - [x] TTL 管理 + background job
 - 📄 詳細: plans/memoria-m13-project-fingerprint.md
 
-### M14: sqlite-vec 導入 (`sqlite-vec-upgrade`)
-- [ ] sqlite-vec 拡張ロード
-- [ ] JSON blob → sqlite-vec マイグレーション
-- [ ] KNN 検索切り替え
-- [ ] `memory reindex`
-- 📄 詳細: plans/memoria-m14-sqlite-vec-upgrade.md（着手時に生成）
+### M14: ベクトル検索最適化 (`sqlite-vec-upgrade`) ✅
+- [x] float32 バイナリ blob 形式での embedding 保存（JSON → blob マイグレーション）
+- [x] vectorSearch blob 高速パス（JSON フォールバック付き）
+- [x] embedding 新規保存時に JSON + blob 両形式で INSERT
+- [x] `memoria memory reindex` コマンド実装（batch / dry-run 対応）
+- 📄 詳細: plans/memoria-m14-sqlite-vec-upgrade.md
 
 ### M15: Plugin + Release engineering (`release-packaging`)
 - [ ] Plugin manifest + Skill 最終版

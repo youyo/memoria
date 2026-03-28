@@ -115,6 +115,188 @@ func TestCosineSimilarity_DifferentLength(t *testing.T) {
 	}
 }
 
+// --- Float32SliceToBytes / BytesToFloat32Slice テスト ---
+
+func TestFloat32SliceToBytes_RoundTrip(t *testing.T) {
+	original := []float32{1.0, -0.5, 0.25, 3.14}
+	encoded := retrieval.Float32SliceToBytes(original)
+	decoded, err := retrieval.BytesToFloat32Slice(encoded)
+	if err != nil {
+		t.Fatalf("BytesToFloat32Slice error: %v", err)
+	}
+	if len(decoded) != len(original) {
+		t.Fatalf("length mismatch: got %d, want %d", len(decoded), len(original))
+	}
+	for i, v := range original {
+		if decoded[i] != v {
+			t.Errorf("decoded[%d] = %v, want %v", i, decoded[i], v)
+		}
+	}
+}
+
+func TestFloat32SliceToBytes_EmptySlice(t *testing.T) {
+	result := retrieval.Float32SliceToBytes(nil)
+	if result != nil {
+		t.Errorf("expected nil for empty slice, got %v", result)
+	}
+	result2 := retrieval.Float32SliceToBytes([]float32{})
+	if result2 != nil {
+		t.Errorf("expected nil for empty slice, got %v", result2)
+	}
+}
+
+func TestBytesToFloat32Slice_InvalidLength(t *testing.T) {
+	// 5 バイトは 4 の倍数でないのでエラー
+	_, err := retrieval.BytesToFloat32Slice([]byte{0x01, 0x02, 0x03, 0x04, 0x05})
+	if err == nil {
+		t.Error("expected error for non-multiple-of-4 bytes, got nil")
+	}
+}
+
+func TestBytesToFloat32Slice_EmptyBytes(t *testing.T) {
+	result, err := retrieval.BytesToFloat32Slice(nil)
+	if err != nil {
+		t.Fatalf("BytesToFloat32Slice(nil) error: %v", err)
+	}
+	if result != nil {
+		t.Errorf("expected nil for empty bytes, got %v", result)
+	}
+}
+
+func TestFloat32SliceToBytes_ByteLength(t *testing.T) {
+	vec := []float32{1.0, 2.0, 3.0}
+	b := retrieval.Float32SliceToBytes(vec)
+	if len(b) != len(vec)*4 {
+		t.Errorf("expected %d bytes, got %d", len(vec)*4, len(b))
+	}
+}
+
+// --- ベンチマーク ---
+
+func makeTestVec(n int) []float32 {
+	vec := make([]float32, n)
+	for i := range vec {
+		vec[i] = float32(i) * 0.01
+	}
+	return vec
+}
+
+func BenchmarkCosineSimilarity(b *testing.B) {
+	dim := 768
+	a := makeTestVec(dim)
+	c := makeTestVec(dim)
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		retrieval.CosineSimilarity(a, c)
+	}
+}
+
+func BenchmarkFloat32SliceToBytes(b *testing.B) {
+	vec := makeTestVec(768)
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		retrieval.Float32SliceToBytes(vec)
+	}
+}
+
+func BenchmarkBytesToFloat32Slice(b *testing.B) {
+	vec := makeTestVec(768)
+	blob := retrieval.Float32SliceToBytes(vec)
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		retrieval.BytesToFloat32Slice(blob) //nolint:errcheck
+	}
+}
+
+func BenchmarkEmbeddingRoundTrip_JSON(b *testing.B) {
+	dim := 768
+	vec := makeTestVec(dim)
+	jsonBytes, _ := json.Marshal(vec)
+	jsonStr := string(jsonBytes)
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		var v []float32
+		json.Unmarshal([]byte(jsonStr), &v) //nolint:errcheck
+	}
+}
+
+func BenchmarkEmbeddingRoundTrip_Blob(b *testing.B) {
+	dim := 768
+	vec := makeTestVec(dim)
+	blob := retrieval.Float32SliceToBytes(vec)
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		retrieval.BytesToFloat32Slice(blob) //nolint:errcheck
+	}
+}
+
+// --- VectorSearch blob パステスト ---
+
+func TestVectorSearch_BlobPath(t *testing.T) {
+	sqlDB := testutil.OpenTestDB(t)
+	insertTestProject(t, sqlDB, "proj1", "/test/project")
+	insertTestChunk(t, sqlDB, "chunk1", "proj1", "vector search content", "summary", "decision", 0.8, "project")
+
+	// blob 形式で embedding を挿入
+	vec := []float32{1.0, 0.0, 0.0}
+	blob := retrieval.Float32SliceToBytes(vec)
+	jsonBytes, _ := json.Marshal(vec)
+	const insertSQL = `
+INSERT INTO chunk_embeddings (chunk_id, model, embedding_json, embedding_blob)
+VALUES (?, 'model', ?, ?)`
+	if _, err := sqlDB.Exec(insertSQL, "chunk1", string(jsonBytes), blob); err != nil {
+		t.Fatalf("insert embedding with blob: %v", err)
+	}
+
+	embedder := &mockEmbedder{
+		embeddings: [][]float32{{0.9, 0.1, 0.0}},
+	}
+
+	r := retrieval.New(sqlDB, embedder)
+	ctx := context.Background()
+	results, err := r.UserPrompt(ctx, "proj1", nil, "vector search", 5)
+	if err != nil {
+		t.Fatalf("UserPrompt BlobPath error: %v", err)
+	}
+	if len(results) == 0 {
+		t.Fatal("expected at least 1 result")
+	}
+	if results[0].ChunkID != "chunk1" {
+		t.Errorf("expected chunk1, got %q", results[0].ChunkID)
+	}
+}
+
+func TestVectorSearch_JSONFallback(t *testing.T) {
+	// embedding_blob が NULL の場合は embedding_json にフォールバックする
+	sqlDB := testutil.OpenTestDB(t)
+	insertTestProject(t, sqlDB, "proj1", "/test/project")
+	insertTestChunk(t, sqlDB, "chunk1", "proj1", "json fallback content", "summary", "fact", 0.7, "project")
+
+	// JSON のみ（blob なし）
+	vec := []float32{1.0, 0.0, 0.0}
+	jsonBytes, _ := json.Marshal(vec)
+	const insertSQL = `
+INSERT INTO chunk_embeddings (chunk_id, model, embedding_json)
+VALUES (?, 'model', ?)`
+	if _, err := sqlDB.Exec(insertSQL, "chunk1", string(jsonBytes)); err != nil {
+		t.Fatalf("insert embedding json only: %v", err)
+	}
+
+	embedder := &mockEmbedder{
+		embeddings: [][]float32{{0.9, 0.1, 0.0}},
+	}
+
+	r := retrieval.New(sqlDB, embedder)
+	ctx := context.Background()
+	results, err := r.UserPrompt(ctx, "proj1", nil, "fallback test", 5)
+	if err != nil {
+		t.Fatalf("UserPrompt JSONFallback error: %v", err)
+	}
+	if len(results) == 0 {
+		t.Fatal("expected at least 1 result with JSON fallback")
+	}
+}
+
 // --- RRF テスト ---
 
 func TestRRF_SingleList(t *testing.T) {

@@ -226,7 +226,7 @@ func TestNotImplementedCommands(t *testing.T) {
 		{"worker", "restart"},
 		{"memory", "list"},
 		{"memory", "stats"},
-		{"memory", "reindex"},
+		// memory reindex は *db.DB DI が必要なため TestMemoryReindex_* で別途検証
 		{"completion", "bash"},
 		{"completion", "zsh"},
 		{"completion", "fish"},
