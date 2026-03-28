@@ -31,6 +31,7 @@ type IngestDaemon struct {
 	logDir      string
 	idleTimeout time.Duration
 	logf        func(string, ...any)
+	processor   JobProcessor
 }
 
 // NewIngestDaemon は IngestDaemon を生成する。
@@ -48,7 +49,13 @@ func NewIngestDaemon(db *sql.DB, q *queue.Queue, runDir, logDir string, idleTime
 	d.logf = func(format string, args ...any) {
 		fmt.Fprintf(os.Stderr, format, args...)
 	}
+	d.processor = NewDefaultJobProcessor(db)
 	return d
+}
+
+// SetProcessor はジョブプロセッサを設定する（テスト用）。
+func (d *IngestDaemon) SetProcessor(p JobProcessor) {
+	d.processor = p
 }
 
 // SetLogf はログ関数を設定する（テスト用）。
@@ -204,14 +211,43 @@ func (d *IngestDaemon) runWatchdog(ctx context.Context, cancelFn context.CancelF
 	}
 }
 
-// processJob はジョブを処理する（M08 で本実装）。
-// M07 では "not implemented" ログのみ出力し、Ack する。
+// processJob はジョブを処理する。
 func (d *IngestDaemon) processJob(ctx context.Context, job *queue.Job) {
-	d.logf("memoria daemon ingest: processJob (not implemented in M07): job_id=%s type=%s\n", job.ID, job.Type)
-	// M07 ではスタブとして Ack（ジョブを消化）
-	if err := d.q.Ack(ctx, job.ID); err != nil {
-		d.logf("memoria daemon ingest: ack failed: %v\n", err)
+	// current_job_id を lease に記録
+	if err := UpdateLeaseJobID(ctx, d.db, WorkerNameIngest, job.ID); err != nil {
+		d.logf("memoria daemon ingest: update lease job_id: %v\n", err)
 	}
+
+	var err error
+	switch job.Type {
+	case queue.JobTypeCheckpointIngest:
+		err = d.processor.HandleCheckpoint(ctx, job)
+	case queue.JobTypeSessionEndIngest:
+		err = d.processor.HandleSessionEnd(ctx, job)
+	default:
+		d.logf("memoria daemon ingest: unknown job type: %s, skipping\n", job.Type)
+		if ackErr := d.q.Ack(ctx, job.ID); ackErr != nil {
+			d.logf("memoria daemon ingest: ack failed: %v\n", ackErr)
+		}
+		UpdateLeaseJobID(ctx, d.db, WorkerNameIngest, "") //nolint:errcheck
+		return
+	}
+
+	if err != nil {
+		d.logf("memoria daemon ingest: processJob failed: job_id=%s err=%v\n", job.ID, err)
+		if failErr := d.q.Fail(ctx, job.ID, err.Error()); failErr != nil {
+			d.logf("memoria daemon ingest: fail job: %v\n", failErr)
+		}
+	} else {
+		if ackErr := d.q.Ack(ctx, job.ID); ackErr != nil {
+			d.logf("memoria daemon ingest: ack failed: %v\n", ackErr)
+		}
+		// last_progress_at を更新
+		UpdateLeaseProgress(ctx, d.db, WorkerNameIngest) //nolint:errcheck
+	}
+
+	// current_job_id をクリア
+	UpdateLeaseJobID(ctx, d.db, WorkerNameIngest, "") //nolint:errcheck
 }
 
 // cleanup は daemon 停止時のクリーンアップを行う。

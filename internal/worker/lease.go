@@ -207,6 +207,32 @@ VALUES (?, ?, ?, ?)`
 	return nil
 }
 
+// UpdateLeaseJobID は worker_leases の current_job_id を更新する。
+// jobID が空文字列の場合は NULL を設定する。
+func UpdateLeaseJobID(ctx context.Context, db *sql.DB, workerName string, jobID string) error {
+	var val interface{}
+	if jobID != "" {
+		val = jobID
+	}
+	const query = `UPDATE worker_leases SET current_job_id = ? WHERE worker_name = ?`
+	_, err := db.ExecContext(ctx, query, val, workerName)
+	if err != nil {
+		return fmt.Errorf("update lease job_id: %w", err)
+	}
+	return nil
+}
+
+// UpdateLeaseProgress は worker_leases の last_progress_at を現在時刻に更新する。
+func UpdateLeaseProgress(ctx context.Context, db *sql.DB, workerName string) error {
+	const query = `UPDATE worker_leases SET last_progress_at = ? WHERE worker_name = ?`
+	now := time.Now().UTC().Format(time.RFC3339)
+	_, err := db.ExecContext(ctx, query, now, workerName)
+	if err != nil {
+		return fmt.Errorf("update lease progress: %w", err)
+	}
+	return nil
+}
+
 // CheckProbeResponded は probe_id の responded_at が設定されているか確認する。
 func CheckProbeResponded(ctx context.Context, db *sql.DB, probeID string) (bool, error) {
 	const query = `SELECT responded_at FROM worker_probes WHERE probe_id = ?`

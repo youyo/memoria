@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **memoria** は Claude Code 向けのプロジェクト認識型ローカル RAG メモリシステム。コーディングセッションから意思決定・制約・失敗・TODO・知見を自動抽出し、SQLite にローカル蓄積する。
 
-現在は **M07 ingest-worker-lifecycle 完了**。Kong CLI 骨格 + XDG パス解決 + config.toml 読み書き + config init/show/path コマンド + SQLite スキーマ + マイグレーション管理 + doctor コマンド + SQLite ベースジョブキュー（Enqueue/Dequeue/Ack/Fail/Purge/Stats）+ `memoria hook stop`（checkpoint_ingest enqueue + project ID 解決）+ `memoria hook session-end`（session_end_ingest enqueue + transcript_path 保存）+ ingest worker ライフサイクル管理（daemon ingest / worker start/stop/status / heartbeat / lease / flock / EnsureIngest 本実装）が実装済み。
+現在は **M08 ingest-worker-loop 完了**。Kong CLI 骨格 + XDG パス解決 + config.toml 読み書き + config init/show/path コマンド + SQLite スキーマ + マイグレーション管理 + doctor コマンド + SQLite ベースジョブキュー（Enqueue/Dequeue/Ack/Fail/Purge/Stats）+ `memoria hook stop`（checkpoint_ingest enqueue + project ID 解決）+ `memoria hook session-end`（session_end_ingest enqueue + transcript_path 保存）+ ingest worker ライフサイクル管理（daemon ingest / worker start/stop/status / heartbeat / lease / flock / EnsureIngest 本実装）+ **ingest worker ジョブ処理ループ**（checkpoint_ingest / session_end_ingest 処理 / transcript パーサー / chunker / ヒューリスティック enrichment / chunks/sessions/turns DB 書き込み / SHA-256 重複排除 / FTS5 自動同期）が実装済み。
 
 ## ビルド・テスト・リント
 
@@ -118,6 +118,18 @@ plugin/memoria/
 ```
 
 インストール: `cp -r plugin/memoria ~/.claude/plugins/`
+
+## M08 からのハンドオフ（実装済み ingest worker ジョブ処理ループ）
+
+- `internal/ingest/transcript.go`: `ParseTranscript(path)` — Claude Code JSONL transcript パーサー（best-effort、無効行スキップ）
+- `internal/ingest/chunker.go`: `Chunk(input)` — user+assistant ペア単位チャンク化、`SplitLongContent(content)` — MaxChunkBytes (16KiB) 超で分割
+- `internal/ingest/enricher.go`: `Enrich(content)` — ヒューリスティック enrichment（kind/importance/scope/keywords/summary）
+- `internal/ingest/store.go`: `UpsertSession()` / `InsertTurn()` / `CountTurnsBySession()` / `InsertChunk()` / `ContentHash()` — DB 書き込み + SHA-256 重複排除
+- `internal/worker/checkpoint.go`: `CheckpointHandler.Handle(ctx, job)` — checkpoint_ingest 処理
+- `internal/worker/session_end.go`: `SessionEndHandler.Handle(ctx, job)` — session_end_ingest 処理（冪等性保証）
+- `internal/worker/processor.go`: `JobProcessor` インターフェース + `DefaultJobProcessor`
+- `internal/worker/lease.go`: `UpdateLeaseJobID()` / `UpdateLeaseProgress()` を追加
+- `internal/worker/daemon.go`: `processJob()` スタブ → 本実装（JobProcessor ディスパッチ、lease 更新）
 
 ## M07 からのハンドオフ（実装済み ingest worker ライフサイクル）
 
