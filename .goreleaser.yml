@@ -53,6 +53,7 @@ brews:
       owner: youyo
       name: homebrew-tap
       token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
+    directory: Formula
     homepage: "https://github.com/youyo/memoria"
     description: "Claude Code 向けプロジェクト認識型ローカル RAG メモリシステム"
     license: "MIT"
