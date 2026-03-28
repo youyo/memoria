@@ -15,20 +15,26 @@ import (
 type JobProcessor interface {
 	HandleCheckpoint(ctx context.Context, job *queue.Job) error
 	HandleSessionEnd(ctx context.Context, job *queue.Job) error
+	HandleProjectRefresh(ctx context.Context, job *queue.Job) error
+	HandleProjectSimilarityRefresh(ctx context.Context, job *queue.Job) error
 }
 
 // DefaultJobProcessor は CheckpointHandler と SessionEndHandler を使った実装。
 type DefaultJobProcessor struct {
-	checkpoint *CheckpointHandler
-	sessionEnd *SessionEndHandler
+	checkpoint         *CheckpointHandler
+	sessionEnd         *SessionEndHandler
+	projectRefresh     *ProjectRefreshHandler
+	similarityRefresh  *ProjectSimilarityRefreshHandler
 }
 
 // NewDefaultJobProcessor は embedding なし（後方互換）の DefaultJobProcessor を生成する。
 // テストやシンプルな用途向け。embedding が必要な場合は NewDefaultJobProcessorWithEmbedding を使う。
 func NewDefaultJobProcessor(db *sql.DB) *DefaultJobProcessor {
 	return &DefaultJobProcessor{
-		checkpoint: NewCheckpointHandler(db),
-		sessionEnd: NewSessionEndHandler(db),
+		checkpoint:        NewCheckpointHandler(db),
+		sessionEnd:        NewSessionEndHandler(db),
+		projectRefresh:    NewProjectRefreshHandler(db, nil, "", nil),
+		similarityRefresh: NewProjectSimilarityRefreshHandler(db, nil),
 	}
 }
 
@@ -45,8 +51,10 @@ func NewDefaultJobProcessorWithEmbedding(db *sql.DB, cfg *config.Config, logf fu
 	embedder := ingest.NewChunkEmbedder(embeddingClient)
 
 	return &DefaultJobProcessor{
-		checkpoint: NewCheckpointHandlerWithEmbedder(db, embedder, model, logf),
-		sessionEnd: NewSessionEndHandlerWithEmbedder(db, embedder, model, logf),
+		checkpoint:        NewCheckpointHandlerWithEmbedder(db, embedder, model, logf),
+		sessionEnd:        NewSessionEndHandlerWithEmbedder(db, embedder, model, logf),
+		projectRefresh:    NewProjectRefreshHandler(db, embeddingClient, model, logf),
+		similarityRefresh: NewProjectSimilarityRefreshHandler(db, logf),
 	}
 }
 
@@ -58,4 +66,14 @@ func (p *DefaultJobProcessor) HandleCheckpoint(ctx context.Context, job *queue.J
 // HandleSessionEnd は session_end_ingest ジョブを処理する。
 func (p *DefaultJobProcessor) HandleSessionEnd(ctx context.Context, job *queue.Job) error {
 	return p.sessionEnd.Handle(ctx, job)
+}
+
+// HandleProjectRefresh は project_refresh ジョブを処理する。
+func (p *DefaultJobProcessor) HandleProjectRefresh(ctx context.Context, job *queue.Job) error {
+	return p.projectRefresh.Handle(ctx, job)
+}
+
+// HandleProjectSimilarityRefresh は project_similarity_refresh ジョブを処理する。
+func (p *DefaultJobProcessor) HandleProjectSimilarityRefresh(ctx context.Context, job *queue.Job) error {
+	return p.similarityRefresh.Handle(ctx, job)
 }

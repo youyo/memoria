@@ -123,11 +123,11 @@ M01 → M02 → M03 → M04 ──→ M05 → M06
 - [x] `config print-hook`
 - 📄 詳細: plans/memoria-m12-retrieval-hooks.md
 
-### M13: プロジェクト識別 + similarity (`project-fingerprint`)
-- [ ] Fingerprint 生成
-- [ ] Similarity 計算 + キャッシュ
-- [ ] TTL 管理 + background job
-- 📄 詳細: plans/memoria-m13-project-fingerprint.md（着手時に生成）
+### M13: プロジェクト識別 + similarity (`project-fingerprint`) ✅
+- [x] Fingerprint 生成
+- [x] Similarity 計算 + キャッシュ
+- [x] TTL 管理 + background job
+- 📄 詳細: plans/memoria-m13-project-fingerprint.md
 
 ### M14: sqlite-vec 導入 (`sqlite-vec-upgrade`)
 - [ ] sqlite-vec 拡張ロード

@@ -88,8 +88,12 @@ func (c *HookSessionStartCmd) RunWithReader(globals *Globals, w io.Writer, reade
 		}
 	}
 
-	// similar projects（M13 まではなし）
-	var similarProjects map[string]float64
+	// M13: フィンガープリント TTL チェック + 非同期更新
+	q := queue.New(sqlDB)
+	project.EnsureFreshFingerprint(ctx, sqlDB, q, projectID, input.Cwd)
+
+	// M13: similar projects を取得（TTL 切れ時は非同期更新をキューに投入）
+	similarProjects := project.GetSimilarProjectsForHook(ctx, sqlDB, q, projectID)
 
 	// retrieval
 	r := retrieval.New(sqlDB, embedder)
@@ -141,8 +145,9 @@ func (c *HookUserPromptCmd) RunWithReader(globals *Globals, w io.Writer, reader 
 		}
 	}
 
-	// similar projects（M13 まではなし）
-	var similarProjects map[string]float64
+	// M13: similar projects を取得（TTL 切れ時は非同期更新をキューに投入）
+	q := queue.New(sqlDB)
+	similarProjects := project.GetSimilarProjectsForHook(ctx, sqlDB, q, projectID)
 
 	// retrieval
 	r := retrieval.New(sqlDB, embedder)

@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **memoria** は Claude Code 向けのプロジェクト認識型ローカル RAG メモリシステム。コーディングセッションから意思決定・制約・失敗・TODO・知見を自動抽出し、SQLite にローカル蓄積する。
 
-現在は **M12 retrieval-hooks 完了**。Kong CLI 骨格 + XDG パス解決 + config.toml 読み書き + config init/show/path コマンド + SQLite スキーマ + マイグレーション管理 + doctor コマンド + SQLite ベースジョブキュー（Enqueue/Dequeue/Ack/Fail/Purge/Stats）+ `memoria hook stop`（checkpoint_ingest enqueue + project ID 解決）+ `memoria hook session-end`（session_end_ingest enqueue + transcript_path 保存）+ ingest worker ライフサイクル管理（daemon ingest / worker start/stop/status / heartbeat / lease / flock / EnsureIngest 本実装）+ ingest worker ジョブ処理ループ（checkpoint_ingest / session_end_ingest 処理 / transcript パーサー / chunker / ヒューリスティック enrichment / chunks/sessions/turns DB 書き込み / SHA-256 重複排除 / FTS5 自動同期）+ **Python embedding worker**（FastAPI + sentence-transformers Ruri v3 / Unix Domain Socket / /embed + /health エンドポイント / idle timeout / PID・lock ファイル管理）+ **Go ↔ Python UDS 通信統合**（internal/embedding.Client / EnsureEmbedding / worker start+stop+status embedding 対応）+ **Ingest に embedding 統合**（chunk 保存後に自動 embedding / chunk_embeddings 保存 / バッチ embedding / embedding worker 未起動時フォールバック）+ **SessionStart/UserPrompt retrieval hooks**（`memoria hook session-start` / `memoria hook user-prompt` / FTS5+Vector+RRF+project boost / `config print-hook`）が実装済み。
+現在は **M13 project-fingerprint 完了**。Kong CLI 骨格 + XDG パス解決 + config.toml 読み書き + config init/show/path コマンド + SQLite スキーマ + マイグレーション管理 + doctor コマンド + SQLite ベースジョブキュー（Enqueue/Dequeue/Ack/Fail/Purge/Stats）+ `memoria hook stop`（checkpoint_ingest enqueue + project ID 解決）+ `memoria hook session-end`（session_end_ingest enqueue + transcript_path 保存）+ ingest worker ライフサイクル管理（daemon ingest / worker start/stop/status / heartbeat / lease / flock / EnsureIngest 本実装）+ ingest worker ジョブ処理ループ（checkpoint_ingest / session_end_ingest 処理 / transcript パーサー / chunker / ヒューリスティック enrichment / chunks/sessions/turns DB 書き込み / SHA-256 重複排除 / FTS5 自動同期）+ **Python embedding worker**（FastAPI + sentence-transformers Ruri v3 / Unix Domain Socket / /embed + /health エンドポイント / idle timeout / PID・lock ファイル管理）+ **Go ↔ Python UDS 通信統合**（internal/embedding.Client / EnsureEmbedding / worker start+stop+status embedding 対応）+ **Ingest に embedding 統合**（chunk 保存後に自動 embedding / chunk_embeddings 保存 / バッチ embedding / embedding worker 未起動時フォールバック）+ **SessionStart/UserPrompt retrieval hooks**（`memoria hook session-start` / `memoria hook user-prompt` / FTS5+Vector+RRF+project boost / `config print-hook`）+ **プロジェクト識別 + similarity（M13）**（fingerprint 生成 / TTL 管理 / project_refresh / project_similarity_refresh background job / hook 統合）が実装済み。
 
 ## ビルド・テスト・リント
 
@@ -118,6 +118,33 @@ plugin/memoria/
 ```
 
 インストール: `cp -r plugin/memoria ~/.claude/plugins/`
+
+## M13 からのハンドオフ（実装済み プロジェクト識別 + similarity）
+
+- `internal/fingerprint/fingerprint.go`: `Generate(rootPath)` — フィンガープリント生成
+  - `DetectPrimaryLanguage(root)` — ファイル拡張子から言語検出（Go/Python/TypeScript 等）
+  - `DetectFrameworks(root)` — 設定ファイルの存在からフレームワーク/ツール検出
+  - `DetectProjectKind(root)` — プロジェクト種別推定（cli/web/library/infra/unknown）
+  - `GenerateFingerprintText(info)` — embedding 対象の自然言語テキスト生成
+  - `GenerateFingerprintJSON(info)` — 構造化 JSON 文字列生成
+- `internal/project/similarity.go`: `SimilarityManager` — project_similarity/project_embeddings CRUD
+  - `NewSimilarityManager(db)` / `GetSimilarProjects(ctx, projectID)` / `UpsertSimilarity(ctx, ...)`
+  - `UpsertProjectEmbedding(ctx, ...)` / `GetProjectEmbedding(ctx, ...)` / `GetAllProjectEmbeddings(ctx)`
+  - `IsFingerprintFresh(ctx, projectID, ttl)` / `IsSimilarityFresh(ctx, projectID, ttl)`
+  - `UpdateFingerprintDB(ctx, projectID, fpJSON, fpText, lang, kind)` — projects テーブル更新
+  - TTL 定数: `FingerprintTTL = 24h` / `SimilarityTTL = 7d`
+- `internal/project/refresh.go`: hook 用 TTL チェック + 非同期キュー投入
+  - `EnsureFreshFingerprint(ctx, db, q, projectID, projectRoot)` — フィンガープリント TTL チェック
+  - `EnsureFreshSimilarity(ctx, db, q, projectID)` — similarity TTL チェック
+  - `GetSimilarProjectsForHook(ctx, db, q, projectID)` — hook 用 similar projects 取得（TTL チェック付き）
+  - `RefreshEnqueuer` インターフェース（queue.Queue が実装）
+- `internal/worker/fingerprint_handler.go`: background job ハンドラ
+  - `ProjectRefreshHandler.Handle(ctx, job)` — fingerprint 生成 + DB 更新 + embedding 保存
+  - `ProjectSimilarityRefreshHandler.Handle(ctx, job)` — コサイン類似度計算 + project_similarity 保存
+  - `ProjectRefreshPayload` / `ProjectSimilarityRefreshPayload` — ジョブペイロード型
+- `internal/worker/processor.go`: `JobProcessor` インターフェースに `HandleProjectRefresh` / `HandleProjectSimilarityRefresh` を追加
+- `internal/worker/daemon.go`: `processJob()` に `project_refresh` / `project_similarity_refresh` case を追加
+- `internal/cli/hook.go`: SessionStart/UserPrompt hook で `EnsureFreshFingerprint` + `GetSimilarProjectsForHook` を呼び出す
 
 ## M12 からのハンドオフ（実装済み SessionStart/UserPrompt retrieval hooks）
 

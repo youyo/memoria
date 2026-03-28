@@ -233,6 +233,10 @@ func (d *IngestDaemon) processJob(ctx context.Context, job *queue.Job) {
 		err = d.processor.HandleCheckpoint(ctx, job)
 	case queue.JobTypeSessionEndIngest:
 		err = d.processor.HandleSessionEnd(ctx, job)
+	case queue.JobTypeProjectRefresh:
+		err = d.processor.HandleProjectRefresh(ctx, job)
+	case queue.JobTypeProjectSimilarityRefresh:
+		err = d.processor.HandleProjectSimilarityRefresh(ctx, job)
 	default:
 		d.logf("memoria daemon ingest: unknown job type: %s, skipping\n", job.Type)
 		if ackErr := d.q.Ack(ctx, job.ID); ackErr != nil {

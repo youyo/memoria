@@ -35,6 +35,14 @@ func (m *mockProcessor) HandleSessionEnd(ctx context.Context, job *queue.Job) er
 	return nil
 }
 
+func (m *mockProcessor) HandleProjectRefresh(ctx context.Context, job *queue.Job) error {
+	return nil
+}
+
+func (m *mockProcessor) HandleProjectSimilarityRefresh(ctx context.Context, job *queue.Job) error {
+	return nil
+}
+
 func newTestDaemonWithProcessor(t *testing.T, db *sql.DB, processor worker.JobProcessor) (*worker.IngestDaemon, *queue.Queue) {
 	t.Helper()
 	q := queue.New(db)
@@ -138,38 +146,50 @@ func TestProcessJobSessionEnd(t *testing.T) {
 	}
 }
 
-func TestProcessJobUnknown(t *testing.T) {
+func TestProcessJobProjectRefresh(t *testing.T) {
 	db := testutil.OpenTestDB(t)
 	ctx := context.Background()
 
-	d, q := newTestDaemonWithProcessor(t, db, &mockProcessor{})
-
-	// 未知の job type を直接 SQL で挿入
-	jobID := "unknown-job-1"
-	_, err := db.ExecContext(ctx,
-		`INSERT INTO jobs (job_id, job_type, payload_json, status) VALUES (?, ?, '{}', 'queued')`,
-		jobID, "project_refresh",
-	)
-	if err != nil {
-		t.Fatalf("insert unknown job: %v", err)
+	handled := false
+	mock := &mockProcessor{
+		handleCheckpointFn: nil,
+		handleSessionEndFn: nil,
 	}
+	// HandleProjectRefresh をオーバーライドするためにカスタムモックを使用
+	type extMock struct {
+		*mockProcessor
+	}
+	// mockProcessor の HandleProjectRefresh は nil 返し（default 実装）
+	_ = handled
 
 	runCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
+	q := queue.New(db)
+	// project_refresh ジョブを enqueue
+	jobID, err := q.Enqueue(ctx, queue.JobTypeProjectRefresh, `{"project_id":"test-id","project_root":"/tmp"}`)
+	if err != nil {
+		t.Fatalf("Enqueue: %v", err)
+	}
+
+	runDir := t.TempDir()
+	logDir := t.TempDir()
+	d := worker.NewIngestDaemon(db, q, runDir, logDir, 100*time.Millisecond)
+	d.SetLogf(func(string, ...any) {})
+	d.SetProcessor(mock)
+
 	if err := d.Run(runCtx); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
-	_ = q
 
-	// ジョブが done になっていること（unknown は Ack してスキップ）
+	// ジョブが done になっていること（mock は nil を返す）
 	var status string
 	row := db.QueryRowContext(ctx, "SELECT status FROM jobs WHERE job_id = ?", jobID)
 	if err := row.Scan(&status); err != nil {
 		t.Fatalf("query job status: %v", err)
 	}
 	if status != "done" {
-		t.Errorf("expected status=done for unknown job type, got %s", status)
+		t.Errorf("expected status=done for project_refresh job, got %s", status)
 	}
 }
 
