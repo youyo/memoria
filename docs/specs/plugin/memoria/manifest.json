@@ -1,11 +1,10 @@
-NOTE: This file is a design reference only. The actual plugin uses the standard Claude Code
-plugin structure:
-
-  plugin/memoria/
-  ├── .claude-plugin/
-  │   └── plugin.json          # Plugin metadata
-  ├── hooks/
-  │   └── hooks.json           # Hook definitions
-  ├── skills/
-  │   └── memoria.md           # Agent skill
-  └── README.md                # Plugin documentation
+{
+  "note": "This file is a design reference only. The actual plugin uses the standard Claude Code plugin structure.",
+  "structure": [
+    "plugin/memoria/",
+    ".claude-plugin/plugin.json          # Plugin metadata",
+    "hooks/hooks.json                    # Hook definitions",
+    "skills/memoria/SKILL.md             # Agent skill",
+    "README.md                           # Plugin documentation"
+  ]
+}

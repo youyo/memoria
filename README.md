@@ -13,7 +13,7 @@ It automatically captures, structures, and retrieves knowledge from coding sessi
 - Data model: `docs/specs/SCHEMA.ja.md`
 - Workers: `docs/specs/WORKERS.ja.md`
 - Retrieval: `docs/specs/RETRIEVAL.ja.md`
-- Agent skill: `skills/memoria/SKILL.md`
+- Agent skill: `plugin/memoria/skills/memoria/SKILL.md`
 
 ## Architecture
 
