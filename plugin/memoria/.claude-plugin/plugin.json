@@ -1,0 +1,8 @@
+{
+  "name": "memoria",
+  "version": "0.1.0",
+  "description": "Project-aware local RAG memory system for Claude Code. Automatically captures decisions, constraints, failures, and insights from coding sessions and retrieves them in future sessions.",
+  "author": {
+    "name": "youyo"
+  }
+}

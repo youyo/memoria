@@ -54,26 +54,21 @@ memoria config init
 memoria config print-hook
 ```
 
-### 3. Install local Claude Code plugin
+### 3. Install Claude Code plugin
+
+#### From a marketplace
+
+```text
+/plugin install memoria
+```
+
+#### Manually (local)
 
 ```bash
 cp -r plugin/memoria ~/.claude/plugins/
 ```
 
-Then in Claude Code:
-
-```text
-/plugin
-```
-
-Enable the plugin.
-
-### 4. Marketplace installation (planned)
-
-```text
-/plugin discover memoria
-/plugin install memoria
-```
+Then enable in Claude Code with `/plugin`.
 
 ## Usage
 

@@ -65,24 +65,21 @@ memoria config init
 memoria config print-hook
 ```
 
-### 3. Claude Code plugin をローカル導入
+### 3. Claude Code plugin を導入
+
+#### マーケットプレイスから
+
+```text
+/plugin install memoria
+```
+
+#### ローカルから手動導入
 
 ```bash
 cp -r plugin/memoria ~/.claude/plugins/
 ```
 
-Claude Code 上では次を実行します。
-
-```text
-/plugin
-```
-
-### 4. Marketplace 導入（予定）
-
-```text
-/plugin discover memoria
-/plugin install memoria
-```
+Claude Code 上で `/plugin` を実行して有効化します。
 
 ## 基本コマンド
 

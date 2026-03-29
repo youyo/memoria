@@ -1,14 +1,11 @@
-{
-  "name": "memoria",
-  "version": "0.1.0",
-  "description": "Project-aware memory system for Claude Code",
-  "hooks": {
-    "SessionStart": "memoria hook session-start",
-    "UserPromptSubmit": "memoria hook user-prompt",
-    "Stop": "memoria hook stop",
-    "SessionEnd": "memoria hook session-end"
-  },
-  "skills": [
-    "skills/memoria/SKILL.md"
-  ]
-}
+NOTE: This file is a design reference only. The actual plugin uses the standard Claude Code
+plugin structure:
+
+  plugin/memoria/
+  ├── .claude-plugin/
+  │   └── plugin.json          # Plugin metadata
+  ├── hooks/
+  │   └── hooks.json           # Hook definitions
+  ├── skills/
+  │   └── memoria.md           # Agent skill
+  └── README.md                # Plugin documentation
