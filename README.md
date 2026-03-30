@@ -28,33 +28,19 @@ Claude Code
 
 ## Installation
 
+### Homebrew
+
+```bash
+brew install youyo/tap/memoria
+```
+
 ### Go install
 
 ```bash
 go install github.com/youyo/memoria@latest
 ```
 
-### Homebrew (planned)
-
-```bash
-brew install youyo/tap/memoria
-```
-
 ## Setup
-
-### 1. Initialize config
-
-```bash
-memoria config init
-```
-
-### 2. Print Claude Code hook config
-
-```bash
-memoria config print-hook
-```
-
-### 3. Install Claude Code plugin
 
 In Claude Code:
 
@@ -63,6 +49,8 @@ In Claude Code:
 ```
 
 Add marketplace: `youyo/memoria`, then enable the plugin.
+
+That's it. Database, migrations, and workers are initialized automatically on first use.
 
 ## Usage
 
