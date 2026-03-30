@@ -254,7 +254,7 @@ VALUES (?, 'model', ?, ?)`
 
 	r := retrieval.New(sqlDB, embedder)
 	ctx := context.Background()
-	results, err := r.UserPrompt(ctx, "proj1", nil, "vector search", 5)
+	results, err := r.UserPrompt(ctx, "proj1", nil, "vector search", 5, false)
 	if err != nil {
 		t.Fatalf("UserPrompt BlobPath error: %v", err)
 	}
@@ -288,7 +288,7 @@ VALUES (?, 'model', ?)`
 
 	r := retrieval.New(sqlDB, embedder)
 	ctx := context.Background()
-	results, err := r.UserPrompt(ctx, "proj1", nil, "fallback test", 5)
+	results, err := r.UserPrompt(ctx, "proj1", nil, "fallback test", 5, false)
 	if err != nil {
 		t.Fatalf("UserPrompt JSONFallback error: %v", err)
 	}
@@ -349,11 +349,11 @@ func TestRRF_EmptyLists(t *testing.T) {
 
 func TestProjectBoost_SameProject(t *testing.T) {
 	results := []retrieval.RankedResult{
-		{ID: "a", Score: 1.0, ProjectID: "proj1"},
-		{ID: "b", Score: 1.0, ProjectID: "proj2"},
+		{ID: "a", Score: 1.0, ProjectID: "proj1", Scope: "project"},
+		{ID: "b", Score: 1.0, ProjectID: "proj2", Scope: "similarity_shareable"},
 	}
 	similar := map[string]float64{"proj2": 0.8}
-	boosted := retrieval.ApplyProjectBoost(results, "proj1", similar)
+	boosted := retrieval.ApplyProjectBoost(results, "proj1", similar, false)
 
 	// "a" (same project) が "b" (similar) より高いはず
 	if boosted[0].ID != "a" {
@@ -363,13 +363,13 @@ func TestProjectBoost_SameProject(t *testing.T) {
 
 func TestProjectBoost_SimilarProject(t *testing.T) {
 	results := []retrieval.RankedResult{
-		{ID: "a", Score: 1.0, ProjectID: "proj3"},
-		{ID: "b", Score: 1.0, ProjectID: "proj2"},
+		{ID: "a", Score: 1.0, ProjectID: "proj3", Scope: "global"},
+		{ID: "b", Score: 1.0, ProjectID: "proj2", Scope: "similarity_shareable"},
 	}
 	similar := map[string]float64{"proj2": 0.8}
-	boosted := retrieval.ApplyProjectBoost(results, "proj1", similar)
+	boosted := retrieval.ApplyProjectBoost(results, "proj1", similar, false)
 
-	// "b" (similar project boost) が "a" (global) より高いはず
+	// "b" (similar project boost) が "a" (other global) より高いはず
 	if boosted[0].ID != "b" {
 		t.Errorf("similar project should rank first, got %q", boosted[0].ID)
 	}
@@ -434,7 +434,7 @@ func TestSessionStartRetrieval_Empty(t *testing.T) {
 	r := retrieval.New(sqlDB, nil)
 	ctx := context.Background()
 
-	results, err := r.SessionStart(ctx, "proj1", nil, 4)
+	results, err := r.SessionStart(ctx, "proj1", nil, 4, false)
 	if err != nil {
 		t.Fatalf("SessionStart error: %v", err)
 	}
@@ -454,7 +454,7 @@ func TestSessionStartRetrieval_WithChunks(t *testing.T) {
 	r := retrieval.New(sqlDB, nil)
 	ctx := context.Background()
 
-	results, err := r.SessionStart(ctx, "proj1", nil, 4)
+	results, err := r.SessionStart(ctx, "proj1", nil, 4, false)
 	if err != nil {
 		t.Fatalf("SessionStart error: %v", err)
 	}
@@ -481,7 +481,7 @@ func TestSessionStartRetrieval_RespectsLimit(t *testing.T) {
 	r := retrieval.New(sqlDB, nil)
 	ctx := context.Background()
 
-	results, err := r.SessionStart(ctx, "proj1", nil, 3)
+	results, err := r.SessionStart(ctx, "proj1", nil, 3, false)
 	if err != nil {
 		t.Fatalf("SessionStart error: %v", err)
 	}
@@ -497,7 +497,7 @@ func TestUserPromptRetrieval_EmptyDB(t *testing.T) {
 	r := retrieval.New(sqlDB, nil)
 	ctx := context.Background()
 
-	results, err := r.UserPrompt(ctx, "proj1", nil, "some query about Go", 5)
+	results, err := r.UserPrompt(ctx, "proj1", nil, "some query about Go", 5, false)
 	if err != nil {
 		t.Fatalf("UserPrompt error: %v", err)
 	}
@@ -516,7 +516,7 @@ func TestUserPromptRetrieval_FTSOnly(t *testing.T) {
 	r := retrieval.New(sqlDB, nil) // embedder = nil (degraded mode)
 	ctx := context.Background()
 
-	results, err := r.UserPrompt(ctx, "proj1", nil, "full text search", 5)
+	results, err := r.UserPrompt(ctx, "proj1", nil, "full text search", 5, false)
 	if err != nil {
 		t.Fatalf("UserPrompt FTSOnly error: %v", err)
 	}
@@ -546,7 +546,7 @@ func TestUserPromptRetrieval_WithEmbedding(t *testing.T) {
 	r := retrieval.New(sqlDB, embedder)
 	ctx := context.Background()
 
-	results, err := r.UserPrompt(ctx, "proj1", nil, "vector search", 5)
+	results, err := r.UserPrompt(ctx, "proj1", nil, "vector search", 5, false)
 	if err != nil {
 		t.Fatalf("UserPrompt WithEmbedding error: %v", err)
 	}
@@ -567,7 +567,7 @@ func TestUserPromptRetrieval_ProjectBoostWins(t *testing.T) {
 	r := retrieval.New(sqlDB, nil)
 	ctx := context.Background()
 
-	results, err := r.UserPrompt(ctx, "proj1", nil, "SQLite query", 5)
+	results, err := r.UserPrompt(ctx, "proj1", nil, "SQLite query", 5, false)
 	if err != nil {
 		t.Fatalf("UserPrompt error: %v", err)
 	}
@@ -671,5 +671,176 @@ func TestFormatContext_NonEmpty(t *testing.T) {
 	// 種別と重要度が含まれるか確認
 	if len(got) < 10 {
 		t.Errorf("formatted context too short: %q", got)
+	}
+}
+
+// --- Isolation / scope テスト ---
+
+// TestSessionStart_IsolatedProject は isolated プロジェクトで SessionStart を呼んだ場合に
+// 自プロジェクトのチャンクのみ返ることを確認する。
+func TestSessionStart_IsolatedProject(t *testing.T) {
+	sqlDB := testutil.OpenTestDB(t)
+	insertTestProject(t, sqlDB, "proj1", "/test/project1")
+	insertTestProject(t, sqlDB, "proj2", "/test/project2")
+
+	// proj1 のチャンク
+	insertTestChunk(t, sqlDB, "chunk1", "proj1", "proj1 local decision", "p1 decision", "decision", 0.8, "project")
+	// proj2 の global スコープチャンク（通常なら流入するが isolated では来ない）
+	insertTestChunk(t, sqlDB, "chunk2", "proj2", "globally shared knowledge", "global fact", "fact", 0.9, "global")
+
+	r := retrieval.New(sqlDB, nil)
+	ctx := context.Background()
+
+	// isolated=true で呼び出す
+	results, err := r.SessionStart(ctx, "proj1", nil, 4, true)
+	if err != nil {
+		t.Fatalf("SessionStart isolated error: %v", err)
+	}
+
+	// proj1 のチャンクのみ返ること
+	for _, res := range results {
+		if res.ProjectID != "proj1" {
+			t.Errorf("isolated project: unexpected chunk from project %q (chunkID=%q)", res.ProjectID, res.ChunkID)
+		}
+	}
+
+	// chunk1 が含まれること
+	found := false
+	for _, res := range results {
+		if res.ChunkID == "chunk1" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Error("expected chunk1 (own project) in isolated results")
+	}
+}
+
+// TestSessionStart_SimilarityShareable は類似プロジェクトの similarity_shareable チャンクが
+// 返り、非類似プロジェクトの shareable は返らないことを確認する。
+func TestSessionStart_SimilarityShareable(t *testing.T) {
+	sqlDB := testutil.OpenTestDB(t)
+	insertTestProject(t, sqlDB, "proj1", "/test/project1")
+	insertTestProject(t, sqlDB, "proj2", "/test/project2") // 類似プロジェクト
+	insertTestProject(t, sqlDB, "proj3", "/test/project3") // 非類似プロジェクト
+
+	// proj1 のチャンク
+	insertTestChunk(t, sqlDB, "chunk1", "proj1", "proj1 own content", "own", "fact", 0.5, "project")
+	// proj2 の similarity_shareable チャンク（類似プロジェクトなので返るはず）
+	insertTestChunk(t, sqlDB, "chunk2", "proj2", "similar project shareable content", "similar shareable", "pattern", 0.7, "similarity_shareable")
+	// proj3 の similarity_shareable チャンク（非類似プロジェクトなので返らないはず）
+	insertTestChunk(t, sqlDB, "chunk3", "proj3", "unrelated project shareable content", "unrelated shareable", "pattern", 0.8, "similarity_shareable")
+
+	// proj2 のみ類似プロジェクト
+	similarProjects := map[string]float64{"proj2": 0.8}
+
+	r := retrieval.New(sqlDB, nil)
+	ctx := context.Background()
+
+	results, err := r.SessionStart(ctx, "proj1", similarProjects, 10, false)
+	if err != nil {
+		t.Fatalf("SessionStart SimilarityShareable error: %v", err)
+	}
+
+	chunkIDs := make(map[string]bool)
+	for _, res := range results {
+		chunkIDs[res.ChunkID] = true
+	}
+
+	// chunk2（類似プロジェクトの shareable）は含まれるはず
+	if !chunkIDs["chunk2"] {
+		t.Error("expected chunk2 (similar project's similarity_shareable) in results")
+	}
+
+	// chunk3（非類似プロジェクトの shareable）は含まれないはず
+	if chunkIDs["chunk3"] {
+		t.Error("unexpected chunk3 (non-similar project's similarity_shareable) in results")
+	}
+}
+
+// TestApplyProjectBoost_ScopeAware は scope に応じた boost/penalty が正しく適用されることを確認する。
+func TestApplyProjectBoost_ScopeAware(t *testing.T) {
+	results := []retrieval.RankedResult{
+		{ID: "same-proj", Score: 1.0, ProjectID: "proj1", Scope: "project"},
+		{ID: "similar-global", Score: 1.0, ProjectID: "proj2", Scope: "global"},
+		{ID: "similar-shareable", Score: 1.0, ProjectID: "proj2", Scope: "similarity_shareable"},
+		{ID: "similar-project", Score: 1.0, ProjectID: "proj2", Scope: "project"},
+		{ID: "other-global", Score: 1.0, ProjectID: "proj3", Scope: "global"},
+		{ID: "other-shareable", Score: 1.0, ProjectID: "proj3", Scope: "similarity_shareable"},
+		{ID: "other-project", Score: 1.0, ProjectID: "proj3", Scope: "project"},
+	}
+	similarProjects := map[string]float64{"proj2": 0.8}
+
+	boosted := retrieval.ApplyProjectBoost(results, "proj1", similarProjects, false)
+
+	// スコアをマップに変換
+	scores := make(map[string]float64)
+	for _, rr := range boosted {
+		scores[rr.ID] = rr.Score
+	}
+
+	// 同プロジェクト: +2.0
+	if scores["same-proj"] != 3.0 {
+		t.Errorf("same project: expected score 3.0, got %f", scores["same-proj"])
+	}
+
+	// 類似プロジェクト global: +1.0
+	if scores["similar-global"] != 2.0 {
+		t.Errorf("similar global: expected score 2.0, got %f", scores["similar-global"])
+	}
+
+	// 類似プロジェクト similarity_shareable: +1.0
+	if scores["similar-shareable"] != 2.0 {
+		t.Errorf("similar shareable: expected score 2.0, got %f", scores["similar-shareable"])
+	}
+
+	// 類似プロジェクト project scope: -3.0
+	if scores["similar-project"] != -2.0 {
+		t.Errorf("similar project scope: expected score -2.0, got %f", scores["similar-project"])
+	}
+
+	// 他プロジェクト global: boost なし、penalty なし
+	if scores["other-global"] != 1.0 {
+		t.Errorf("other global: expected score 1.0, got %f", scores["other-global"])
+	}
+
+	// 他プロジェクト similarity_shareable: -1.0
+	if scores["other-shareable"] != 0.0 {
+		t.Errorf("other shareable: expected score 0.0, got %f", scores["other-shareable"])
+	}
+
+	// 他プロジェクト project scope: -3.0
+	if scores["other-project"] != -2.0 {
+		t.Errorf("other project scope: expected score -2.0, got %f", scores["other-project"])
+	}
+}
+
+// TestApplyProjectBoost_Isolated は isolated=true の場合に他プロジェクトのスコアが -999 になることを確認する。
+func TestApplyProjectBoost_Isolated(t *testing.T) {
+	results := []retrieval.RankedResult{
+		{ID: "own", Score: 1.0, ProjectID: "proj1", Scope: "project"},
+		{ID: "other-global", Score: 1.0, ProjectID: "proj2", Scope: "global"},
+		{ID: "other-project", Score: 1.0, ProjectID: "proj2", Scope: "project"},
+	}
+
+	boosted := retrieval.ApplyProjectBoost(results, "proj1", nil, true)
+
+	scores := make(map[string]float64)
+	for _, rr := range boosted {
+		scores[rr.ID] = rr.Score
+	}
+
+	// 自プロジェクト: スコアそのまま
+	if scores["own"] != 1.0 {
+		t.Errorf("isolated own: expected score 1.0, got %f", scores["own"])
+	}
+
+	// 他プロジェクト（global であっても）: -999
+	if scores["other-global"] != -999 {
+		t.Errorf("isolated other-global: expected score -999, got %f", scores["other-global"])
+	}
+	if scores["other-project"] != -999 {
+		t.Errorf("isolated other-project: expected score -999, got %f", scores["other-project"])
 	}
 }

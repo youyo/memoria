@@ -113,6 +113,45 @@ semantic relevance + fts relevance + same project boost + similar project boost 
 same project boost + similar project boost + importance + recency + weak semantic
 ```
 
+## スコープポリシー（マルチプロジェクト）
+
+### 4 スコープ体制
+
+| スコープ | 自プロジェクト | 類似プロジェクト | 全プロジェクト | 用途 |
+|---------|:---:|:---:|:---:|------|
+| `project` | o | x | x | ドメイン知識、意思決定、TODO |
+| `similarity_shareable` | o | o | x | 類似技術スタックの知見 |
+| `global` | o | o | o | 汎用的な技術パターン |
+| `isolated`（プロジェクト属性） | o | x | x | 機密プロジェクト（global も流入しない） |
+
+`isolated` はチャンクの scope ではなく、`projects.isolation_mode = 'isolated'` で制御するプロジェクトレベルの属性。
+
+### isolated プロジェクトの挙動
+
+- **retrieval**: 自プロジェクトのチャンクのみ返す（global も流入しない）
+- **ingest**: scope を強制的に `project` に上書き（global への昇格を防止）
+- **similarity**: 類似プロジェクトが存在しても無視する
+
+### scope-aware boost ルール
+
+| チャンクの出所 | scope | boost |
+|-------------|-------|-------|
+| 同プロジェクト | any | +2.0 |
+| 類似プロジェクト | global | +1.0 |
+| 類似プロジェクト | similarity_shareable | +1.0 |
+| 類似プロジェクト | project | -3.0 |
+| その他プロジェクト | global | +0.0（ペナルティなし） |
+| その他プロジェクト | similarity_shareable | -1.0 |
+| その他プロジェクト | project | -3.0 |
+
+isolated プロジェクトの場合、他プロジェクトのチャンクにはすべて -999 を設定して実質除外する。
+
+### SessionStart の SQL フィルタリング
+
+- **isolated=true**: `WHERE c.project_id = ?` のみ
+- **isolated=false + 類似プロジェクトあり**: `WHERE c.project_id = ? OR c.scope = 'global' OR (c.scope = 'similarity_shareable' AND c.project_id IN (...))`
+- **isolated=false + 類似プロジェクトなし**: `WHERE c.project_id = ? OR c.scope = 'global'`
+
 ## LLM enrichment と retrieval の関係
 
 chunk 保存時に LLM が以下を付与する。

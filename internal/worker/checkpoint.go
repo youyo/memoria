@@ -10,6 +10,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/youyo/memoria/internal/ingest"
+	"github.com/youyo/memoria/internal/project"
 	"github.com/youyo/memoria/internal/queue"
 )
 
@@ -73,6 +74,9 @@ func (h *CheckpointHandler) Handle(ctx context.Context, job *queue.Job) error {
 		return nil
 	}
 
+	// isolation_mode を確認（isolated プロジェクトでは scope を強制的に "project" に上書き）
+	projectIsolated := project.IsIsolated(ctx, h.db, payload.ProjectID)
+
 	// 2. sessions テーブルに UPSERT
 	startedAt := payload.CapturedAt
 	if startedAt.IsZero() {
@@ -99,6 +103,11 @@ func (h *CheckpointHandler) Handle(ctx context.Context, job *queue.Job) error {
 
 		// 4. ヒューリスティック enrichment
 		enriched := ingest.Enrich(part)
+
+		// isolated プロジェクトでは scope を強制的に "project" に上書き
+		if projectIsolated {
+			enriched.Scope = "project"
+		}
 
 		// 5. content_hash
 		contentHash := ingest.ContentHash(part)

@@ -23,7 +23,7 @@ func Enrich(content string) EnrichedChunk {
 
 	kind := inferKind(lower)
 	importance := inferImportance(lower, kind, content)
-	scope := inferScope(lower)
+	scope := inferScope(lower, kind)
 	keywords := extractKeywords(content)
 	summary := makeSummary(content)
 
@@ -115,23 +115,78 @@ func inferImportance(lower, kind, original string) float64 {
 	return score
 }
 
-// inferScope はコンテンツ（小文字化済み）から scope を推定する。
-func inferScope(lower string) string {
-	globalWords := []string{"global", "汎用", "どこでも使える", "general purpose", "universally"}
-	for _, w := range globalWords {
-		if strings.Contains(lower, w) {
-			return "global"
+// inferScope はコンテンツ（小文字化済み）と kind から scope を推定する。
+// 「コンテンツは閉じる、技術は開く」原則に基づいたスコアリング方式。
+func inferScope(lower string, kind string) string {
+	techScore := 0
+	contentScore := 0
+
+	// 技術指標 (各 +1)
+	techKeywords := []string{"func ", "def ", "class ", "import ", "require(", "package ", "interface ", "struct "}
+	errorKeywords := []string{"error:", "panic:", "stack trace", "exception", "traceback", "workaround"}
+	libKeywords := []string{"github.com/", "npm:", "pip install", "go get", "cargo add", "brew install"}
+	patternKeywords := []string{"pattern", "anti-pattern", "best practice", "idiom"}
+	techVerbs := []string{"refactor", "optimize", "migrate", "deploy", "configure", "benchmark"}
+	fileExts := []string{".go", ".py", ".ts", ".js", ".sql", ".yaml", ".toml"}
+
+	for _, list := range [][]string{techKeywords, errorKeywords, libKeywords, patternKeywords, techVerbs, fileExts} {
+		for _, kw := range list {
+			if strings.Contains(lower, kw) {
+				techScore++
+			}
 		}
 	}
 
-	similarWords := []string{"similar", "同様", "プロジェクト間", "cross-project", "transferable"}
-	for _, w := range similarWords {
-		if strings.Contains(lower, w) {
-			return "similarity_shareable"
+	// kind ボーナス（技術指標）
+	switch kind {
+	case "pattern":
+		techScore += 2
+	case "failure":
+		techScore += 1
+	}
+
+	// 後方互換 (旧キーワード、強シグナル +3)
+	legacyGlobal := []string{"global", "汎用", "どこでも使える", "universally"}
+	for _, kw := range legacyGlobal {
+		if strings.Contains(lower, kw) {
+			techScore += 3
 		}
 	}
 
-	return "project"
+	// コンテンツ指標 (各 +1)
+	decisionKeywords := []string{"decided", "chose", "requirement", "stakeholder", "にする", "にした"}
+	domainKeywords := []string{"business", "仕様", "要件", "ドメイン", "policy"}
+	for _, list := range [][]string{decisionKeywords, domainKeywords} {
+		for _, kw := range list {
+			if strings.Contains(lower, kw) {
+				contentScore++
+			}
+		}
+	}
+
+	// kind ボーナス（コンテンツ指標）
+	switch kind {
+	case "decision":
+		contentScore += 2
+	case "constraint":
+		contentScore += 2
+	case "todo":
+		contentScore += 3 // TODO は常に project
+	case "preference":
+		contentScore += 1
+	}
+
+	// 判定
+	if contentScore >= 3 {
+		return "project" // コンテンツベトー
+	}
+	if techScore > contentScore && techScore >= 3 {
+		return "global"
+	}
+	if techScore > contentScore && techScore >= 2 {
+		return "similarity_shareable"
+	}
+	return "project" // 安全デフォルト
 }
 
 // stopWords は除去するストップワード（英語 + 日本語）。

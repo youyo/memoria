@@ -60,14 +60,32 @@ func New(db *sql.DB, embedder Embedder) *Retriever {
 // SessionStart は project boost + importance + recency で chunks を取得する。
 // similarProjects は project_id -> similarity スコアのマップ（nil 可）。
 // maxResults は上限件数。
-func (r *Retriever) SessionStart(ctx context.Context, projectID string, similarProjects map[string]float64, maxResults int) ([]Result, error) {
+// isolated=true の場合は自プロジェクトのチャンクのみ返す（global も流入しない）。
+func (r *Retriever) SessionStart(ctx context.Context, projectID string, similarProjects map[string]float64, maxResults int, isolated bool) ([]Result, error) {
 	if maxResults <= 0 {
 		maxResults = 4
 	}
 
-	// scope フィルタ: same project / global / similarity_shareable を対象にする
-	// same project は scope に関係なく取得
-	const query = `
+	var (
+		rows *sql.Rows
+		err  error
+	)
+
+	if isolated {
+		// isolated プロジェクト: 自プロジェクトのチャンクのみ
+		const query = `
+SELECT c.chunk_id, c.content, c.summary, c.kind, c.importance, c.scope, c.project_id, c.created_at,
+       3.0
+       + c.importance
+       + (1.0 / (julianday('now') - julianday(c.created_at) + 1)) AS score
+FROM chunks c
+WHERE c.project_id = ?
+ORDER BY score DESC
+LIMIT ?`
+		rows, err = r.db.QueryContext(ctx, query, projectID, maxResults*3)
+	} else if len(similarProjects) == 0 {
+		// 類似プロジェクトなし: same project + global のみ
+		const query = `
 SELECT c.chunk_id, c.content, c.summary, c.kind, c.importance, c.scope, c.project_id, c.created_at,
        CASE WHEN c.project_id = ? THEN 3.0 ELSE 0.0 END
        + c.importance
@@ -75,11 +93,40 @@ SELECT c.chunk_id, c.content, c.summary, c.kind, c.importance, c.scope, c.projec
 FROM chunks c
 WHERE c.project_id = ?
    OR c.scope = 'global'
-   OR c.scope = 'similarity_shareable'
 ORDER BY score DESC
 LIMIT ?`
+		rows, err = r.db.QueryContext(ctx, query, projectID, projectID, maxResults*3)
+	} else {
+		// 類似プロジェクトあり: same project + global + similarity_shareable（類似プロジェクトから）
+		// 類似プロジェクト ID を展開して IN 句を構築
+		similarIDs := make([]string, 0, len(similarProjects))
+		for id := range similarProjects {
+			similarIDs = append(similarIDs, id)
+		}
+		placeholders := strings.Repeat("?,", len(similarIDs))
+		placeholders = placeholders[:len(placeholders)-1] // 末尾の "," を除去
 
-	rows, err := r.db.QueryContext(ctx, query, projectID, projectID, maxResults*3)
+		queryStr := fmt.Sprintf(`
+SELECT c.chunk_id, c.content, c.summary, c.kind, c.importance, c.scope, c.project_id, c.created_at,
+       CASE WHEN c.project_id = ? THEN 3.0 ELSE 0.0 END
+       + c.importance
+       + (1.0 / (julianday('now') - julianday(c.created_at) + 1)) AS score
+FROM chunks c
+WHERE c.project_id = ?
+   OR c.scope = 'global'
+   OR (c.scope = 'similarity_shareable' AND c.project_id IN (%s))
+ORDER BY score DESC
+LIMIT ?`, placeholders)
+
+		args := make([]any, 0, 2+len(similarIDs)+1)
+		args = append(args, projectID, projectID)
+		for _, id := range similarIDs {
+			args = append(args, id)
+		}
+		args = append(args, maxResults*3)
+		rows, err = r.db.QueryContext(ctx, queryStr, args...)
+	}
+
 	if err != nil {
 		return nil, fmt.Errorf("session start query: %w", err)
 	}
@@ -103,7 +150,7 @@ LIMIT ?`
 	}
 
 	// similar project boost を適用
-	boosted := ApplyProjectBoost(candidates, projectID, similarProjects)
+	boosted := ApplyProjectBoost(candidates, projectID, similarProjects, isolated)
 
 	// 上位 maxResults 件に絞る
 	if len(boosted) > maxResults {
@@ -115,7 +162,8 @@ LIMIT ?`
 
 // UserPrompt は FTS + vector + project boost + RRF で chunks を検索する。
 // embedder が nil の場合は FTS only で動作する（degraded mode）。
-func (r *Retriever) UserPrompt(ctx context.Context, projectID string, similarProjects map[string]float64, prompt string, maxResults int) ([]Result, error) {
+// isolated=true の場合は scope-aware boost で他プロジェクトチャンクが実質除外される。
+func (r *Retriever) UserPrompt(ctx context.Context, projectID string, similarProjects map[string]float64, prompt string, maxResults int, isolated bool) ([]Result, error) {
 	if maxResults <= 0 {
 		maxResults = 5
 	}
@@ -154,7 +202,18 @@ func (r *Retriever) UserPrompt(ctx context.Context, projectID string, similarPro
 	merged := MergeRRF(lists, 60)
 
 	// project boost を適用
-	boosted := ApplyProjectBoost(merged, projectID, similarProjects)
+	boosted := ApplyProjectBoost(merged, projectID, similarProjects, isolated)
+
+	// isolated の場合は score が -999 のチャンク（他プロジェクト）を除外
+	if isolated {
+		filtered := boosted[:0]
+		for _, rr := range boosted {
+			if rr.Score > -100 {
+				filtered = append(filtered, rr)
+			}
+		}
+		boosted = filtered
+	}
 
 	// 上位 maxResults 件に絞る
 	if len(boosted) > maxResults {

@@ -15,20 +15,44 @@ const (
 // スコア降順でソートした新しいスライスを返す。
 // currentProjectID は現在のプロジェクト ID。
 // similarProjects は similar_project_id -> similarity スコアのマップ（nil 可）。
-func ApplyProjectBoost(results []RankedResult, currentProjectID string, similarProjects map[string]float64) []RankedResult {
+// isolated=true の場合は他プロジェクトのチャンクに -999 を設定して実質除外する。
+func ApplyProjectBoost(results []RankedResult, currentProjectID string, similarProjects map[string]float64, isolated bool) []RankedResult {
 	if len(results) == 0 {
 		return results
 	}
 
 	boosted := make([]RankedResult, len(results))
 	for i, rr := range results {
-		boost := 0.0
-		if rr.ProjectID == currentProjectID {
-			boost = sameProjectBoost
-		} else if sim, ok := similarProjects[rr.ProjectID]; ok && sim >= similarProjectThreshold {
-			boost = similarProjectBoost
+		if isolated {
+			// isolated プロジェクト: 自プロジェクトのみ許可、他は実質除外
+			if rr.ProjectID != currentProjectID {
+				rr.Score = -999
+			}
+		} else {
+			// 通常プロジェクト: scope-aware boost
+			if rr.ProjectID == currentProjectID {
+				// 同プロジェクト: 常に boost
+				rr.Score += sameProjectBoost
+			} else if sim, ok := similarProjects[rr.ProjectID]; ok && sim >= similarProjectThreshold {
+				// 類似プロジェクト: scope に関わらず boost（global / similarity_shareable）
+				// project scope のチャンクは類似プロジェクトからも高ペナルティ
+				if rr.Scope == "global" || rr.Scope == "similarity_shareable" {
+					rr.Score += similarProjectBoost
+				} else {
+					rr.Score -= 3.0 // project scope from similar project
+				}
+			} else {
+				// その他プロジェクト: scope によって扱いが異なる
+				switch rr.Scope {
+				case "global":
+					// boost なし、ペナルティなし
+				case "similarity_shareable":
+					rr.Score -= 1.0
+				default: // "project"
+					rr.Score -= 3.0
+				}
+			}
 		}
-		rr.Score += boost
 		boosted[i] = rr
 	}
 

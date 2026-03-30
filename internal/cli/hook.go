@@ -98,9 +98,12 @@ func (c *HookSessionStartCmd) RunWithReader(globals *Globals, w io.Writer, reade
 	// M13: similar projects を取得（TTL 切れ時は非同期更新をキューに投入）
 	similarProjects := project.GetSimilarProjectsForHook(ctx, sqlDB, q, projectID)
 
+	// isolation_mode を確認
+	isolated := project.IsIsolated(ctx, sqlDB, projectID)
+
 	// retrieval
 	r := retrieval.New(sqlDB, embedder)
-	results, err := r.SessionStart(ctx, projectID, similarProjects, 4)
+	results, err := r.SessionStart(ctx, projectID, similarProjects, 4, isolated)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "memoria hook session-start: retrieval error: %v\n", err)
 		return writeHookOutput(w, "SessionStart", "")
@@ -156,9 +159,12 @@ func (c *HookUserPromptCmd) RunWithReader(globals *Globals, w io.Writer, reader 
 	q := queue.New(sqlDB)
 	similarProjects := project.GetSimilarProjectsForHook(ctx, sqlDB, q, projectID)
 
+	// isolation_mode を確認
+	isolated := project.IsIsolated(ctx, sqlDB, projectID)
+
 	// retrieval
 	r := retrieval.New(sqlDB, embedder)
-	results, err := r.UserPrompt(ctx, projectID, similarProjects, input.Prompt, 5)
+	results, err := r.UserPrompt(ctx, projectID, similarProjects, input.Prompt, 5, isolated)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "memoria hook user-prompt: retrieval error: %v\n", err)
 		return writeHookOutput(w, "UserPromptSubmit", "")

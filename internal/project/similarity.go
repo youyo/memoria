@@ -194,6 +194,18 @@ SELECT MAX(computed_at) FROM project_similarity WHERE project_id = ?`
 	return time.Since(latest) < ttl
 }
 
+// IsIsolated はプロジェクトが isolated モードかどうかを返す。
+// isolated モードではプロジェクト外のチャンクが retrieval で返されない。
+func IsIsolated(ctx context.Context, db *sql.DB, projectID string) bool {
+	var mode string
+	err := db.QueryRowContext(ctx,
+		"SELECT isolation_mode FROM projects WHERE project_id = ?", projectID).Scan(&mode)
+	if err != nil {
+		return false // エラー時はデフォルト（normal）
+	}
+	return mode == "isolated"
+}
+
 // UpdateFingerprintDB は projects テーブルの fingerprint 関連カラムを更新する。
 func (m *SimilarityManager) UpdateFingerprintDB(ctx context.Context, projectID, fingerprintJSON, fingerprintText, primaryLanguage, projectKind string) error {
 	now := time.Now().UTC().Format(time.RFC3339)

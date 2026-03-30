@@ -127,7 +127,8 @@ func TestEnrichScopeGlobal(t *testing.T) {
 }
 
 func TestEnrichScopeSimilarity(t *testing.T) {
-	result := ingest.Enrich("This is transferable across similar projects")
+	// techScore=2 (import, deploy) > contentScore=0 → similarity_shareable
+	result := ingest.Enrich("import して deploy する方法")
 	if result.Scope != "similarity_shareable" {
 		t.Errorf("expected scope=similarity_shareable, got %s", result.Scope)
 	}

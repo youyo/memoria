@@ -10,6 +10,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/youyo/memoria/internal/ingest"
+	"github.com/youyo/memoria/internal/project"
 	"github.com/youyo/memoria/internal/queue"
 )
 
@@ -139,6 +140,9 @@ func (h *SessionEndHandler) Handle(ctx context.Context, job *queue.Job) error {
 		ProjectID: payload.ProjectID,
 	})
 
+	// isolation_mode を確認（isolated プロジェクトでは scope を強制的に "project" に上書き）
+	projectIsolated := project.IsIsolated(ctx, h.db, payload.ProjectID)
+
 	// 8 & 9. 各 chunk に enrichment を適用して INSERT
 	var insertedChunkIDs []string
 	for _, rawChunk := range rawChunks {
@@ -147,6 +151,11 @@ func (h *SessionEndHandler) Handle(ctx context.Context, job *queue.Job) error {
 		}
 
 		enriched := ingest.Enrich(rawChunk.Content)
+
+		// isolated プロジェクトでは scope を強制的に "project" に上書き
+		if projectIsolated {
+			enriched.Scope = "project"
+		}
 		contentHash := ingest.ContentHash(rawChunk.Content)
 		chunkID := uuid.New().String()
 
