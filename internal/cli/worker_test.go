@@ -121,12 +121,15 @@ func TestWorkerStop_EmbeddingNotRunning(t *testing.T) {
 	}
 }
 
-func TestWorkerRestart_NotImplemented(t *testing.T) {
+func TestWorkerRestart_StopThenStart(t *testing.T) {
 	stdout, _, err := parseForTest(t, []string{"worker", "restart"})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if !strings.Contains(stdout, "not implemented") {
-		t.Errorf("expected 'not implemented', got: %s", stdout)
+	// stop → start の順序で実行されるので、stop 結果（was not running/stopped）と start 結果（started/already running）の両方が含まれる
+	hasStop := strings.Contains(stdout, "was not running") || strings.Contains(stdout, "stopped")
+	hasStart := strings.Contains(stdout, "started") || strings.Contains(stdout, "already running")
+	if !hasStop || !hasStart {
+		t.Errorf("expected stop+start messages, got: %s", stdout)
 	}
 }

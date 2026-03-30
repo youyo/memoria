@@ -17,7 +17,6 @@ type CLI struct {
 	Memory     MemoryCmd     `cmd:"" help:"メモリ操作コマンド"`
 	Config     ConfigCmd     `cmd:"" name:"config" help:"設定管理コマンド"`
 	Completion CompletionCmd `cmd:"" help:"シェル補完スクリプト生成"`
-	Plugin     PluginCmd     `cmd:"" help:"プラグイン管理コマンド"`
 	Doctor     DoctorCmd     `cmd:"" help:"システム診断"`
 	Version    VersionCmd    `cmd:"" help:"バージョン情報を表示"`
 	Daemon     DaemonCmd     `cmd:"" help:"内部デーモンコマンド" hidden:""`

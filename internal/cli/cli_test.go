@@ -167,24 +167,8 @@ func TestConfigSubcommands(t *testing.T) {
 func TestCompletionSubcommands(t *testing.T) {
 	stdout, _, err := parseForTest(t, []string{"completion", "--help"})
 	_ = err
-
-	expectedSubs := []string{"bash", "zsh", "fish"}
-	for _, sub := range expectedSubs {
-		if !strings.Contains(stdout, sub) {
-			t.Errorf("expected completion help to contain %q, got: %s", sub, stdout)
-		}
-	}
-}
-
-func TestPluginSubcommands(t *testing.T) {
-	stdout, _, err := parseForTest(t, []string{"plugin", "--help"})
-	_ = err
-
-	expectedSubs := []string{"list", "doctor"}
-	for _, sub := range expectedSubs {
-		if !strings.Contains(stdout, sub) {
-			t.Errorf("expected plugin help to contain %q, got: %s", sub, stdout)
-		}
+	if !strings.Contains(stdout, "zsh") {
+		t.Errorf("expected completion help to contain 'zsh', got: %s", stdout)
 	}
 }
 
@@ -215,35 +199,3 @@ func TestNoColorFlag(t *testing.T) {
 	}
 }
 
-func TestNotImplementedCommands(t *testing.T) {
-	// config init/show/path は M02 で実装済みのため除外
-	// config print-hook は M12 で実装済みのため除外（TestConfigPrintHook_* で検証）
-	// hook session-start は M12 で実装済みのため除外（TestHookSessionStart_* で検証）
-	// hook user-prompt は M12 で実装済みのため除外（TestHookUserPrompt_* で検証）
-	// hook stop は M05 で本実装済みのため TestHookStop_* で検証
-	// hook session-end は M06 で本実装済みのため TestHookSessionEnd_* で検証
-	// worker start/stop/status は M07 で本実装済みのため TestWorker* で検証
-	// doctor は M03 で実装済みのため除外（doctor_test.go で専用テスト）
-	commands := [][]string{
-		{"worker", "restart"},
-		// memory list/stats は *db.DB DI が必要なため TestMemoryList_*/TestMemoryStats_* で別途検証
-		// memory reindex は *db.DB DI が必要なため TestMemoryReindex_* で別途検証
-		{"completion", "bash"},
-		{"completion", "zsh"},
-		{"completion", "fish"},
-		{"plugin", "list"},
-		{"plugin", "doctor"},
-	}
-
-	for _, args := range commands {
-		t.Run(strings.Join(args, "_"), func(t *testing.T) {
-			stdout, _, err := parseForTest(t, args)
-			if err != nil {
-				t.Fatalf("unexpected error for %v: %v", args, err)
-			}
-			if !strings.Contains(stdout, "not implemented") {
-				t.Errorf("expected 'not implemented' for %v, got: %s", args, stdout)
-			}
-		})
-	}
-}

@@ -241,8 +241,12 @@ type WorkerRestartCmd struct{}
 
 // Run は worker restart を実行する。
 func (c *WorkerRestartCmd) Run(globals *Globals, w *io.Writer) error {
-	fmt.Fprintln(*w, "not implemented")
-	return nil
+	stop := &WorkerStopCmd{}
+	if err := stop.Run(globals, w); err != nil {
+		return err
+	}
+	start := &WorkerStartCmd{}
+	return start.Run(globals, w)
 }
 
 // EmbeddingWorkerStatus は embedding worker の状態を表す。
