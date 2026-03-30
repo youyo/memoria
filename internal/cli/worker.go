@@ -45,14 +45,14 @@ func (c *WorkerStartCmd) Run(globals *Globals, w *io.Writer) error {
 		worker.EnsureIngest(ctx)
 	}()
 
-	// embedding worker を並列起動（初回起動時に venv 作成 + モデルロードが必要なため長めのタイムアウト）
+	// embedding worker を spawn（health check は待たない — hook 側で EnsureEmbedding する）
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 		if cfg != nil {
-			if err := worker.EnsureEmbedding(ctx, cfg); err != nil {
+			if err := worker.SpawnEmbeddingIfNeeded(ctx, cfg); err != nil {
 				fmt.Fprintf(os.Stderr, "memoria worker start: embedding: %v\n", err)
 			}
 		}

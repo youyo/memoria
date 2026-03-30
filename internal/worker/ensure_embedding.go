@@ -28,6 +28,18 @@ func EnsureEmbedding(ctx context.Context, cfg *config.Config) error {
 	return ensureEmbeddingWithClient(ctx, cfg, client)
 }
 
+// SpawnEmbeddingIfNeeded は embedding worker が起動していなければ spawn する。
+// health check は行わない（fire-and-forget）。worker start コマンド用。
+func SpawnEmbeddingIfNeeded(ctx context.Context, cfg *config.Config) error {
+	client := embedding.New(config.SocketPath())
+	// 既に起動中なら何もしない
+	if _, err := client.Health(ctx); err == nil {
+		return nil
+	}
+	// spawn のみ（health check 待ちなし）
+	return spawnEmbeddingWorkerFn(cfg)
+}
+
 // ensureEmbeddingWithClient はテスト可能な内部実装。client を外部から注入する。
 func ensureEmbeddingWithClient(ctx context.Context, cfg *config.Config, client *embedding.Client) error {
 	// 既に起動中か確認
