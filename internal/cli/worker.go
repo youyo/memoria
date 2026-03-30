@@ -31,18 +31,24 @@ type WorkerStartCmd struct{}
 
 // Run は worker start を実行する（本番用: DB を自動オープン）。
 func (c *WorkerStartCmd) Run(globals *Globals, w *io.Writer) error {
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
+	ingestCtx, ingestCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer ingestCancel()
 
-	worker.EnsureIngest(ctx)
+	worker.EnsureIngest(ingestCtx)
 
-	// embedding worker も起動を試みる（失敗は警告のみ）
+	// embedding worker は初回起動時に venv 作成 + モデルロードが必要なため長めのタイムアウト
+	embeddingCtx, embeddingCancel := context.WithTimeout(context.Background(), 120*time.Second)
+	defer embeddingCancel()
+
 	cfg, cfgErr := config.Load(config.ConfigFile())
 	if cfgErr == nil {
-		if err := worker.EnsureEmbedding(ctx, cfg); err != nil {
+		if err := worker.EnsureEmbedding(embeddingCtx, cfg); err != nil {
 			fmt.Fprintf(os.Stderr, "memoria worker start: embedding: %v\n", err)
 		}
 	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
 
 	database, err := openWorkerDB()
 	if err != nil {
