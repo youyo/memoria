@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"unicode/utf8"
 )
 
 // Embedder は embedding を取得するためのインターフェース。
@@ -176,12 +177,11 @@ func (r *Retriever) FTSSearch(ctx context.Context, query string, limit int) ([]R
 	}
 
 	const sqlQuery = `
-SELECT c.chunk_id, c.content, c.summary, c.kind, c.importance, c.scope, c.project_id, c.created_at,
-       bm25(chunks_fts) as fts_score
+SELECT c.chunk_id, c.content, c.summary, c.kind, c.importance, c.scope, c.project_id, c.created_at
 FROM chunks_fts
 JOIN chunks c ON chunks_fts.rowid = c.rowid
 WHERE chunks_fts MATCH ?
-ORDER BY fts_score
+ORDER BY c.created_at DESC
 LIMIT ?`
 
 	rows, err := r.db.QueryContext(ctx, sqlQuery, ftsQuery, limit)
@@ -195,17 +195,17 @@ LIMIT ?`
 	for rows.Next() {
 		var rr RankedResult
 		var summary sql.NullString
-		var ftsScore float64
 		if err := rows.Scan(
 			&rr.ID, &rr.Content, &summary, &rr.Kind, &rr.Importance, &rr.Scope, &rr.ProjectID, &rr.CreatedAt,
-			&ftsScore,
 		); err != nil {
 			return nil, fmt.Errorf("scan fts row: %w", err)
 		}
 		rr.Summary = summary.String
-		// bm25 は負値（小さいほど良い）なので反転して正スコアにする
-		rr.Score = -ftsScore
 		results = append(results, rr)
+	}
+	// trigram トークナイザーは bm25 非対応のため、位置ベーススコアを付与
+	for i := range results {
+		results[i].Score = 1.0 / float64(i+1)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("fts rows error: %w", err)
@@ -334,9 +334,15 @@ func buildFTSQuery(query string) string {
 	escaped := make([]string, 0, len(tokens))
 	for _, t := range tokens {
 		t = escapeFTSToken(t)
-		if t != "" {
-			escaped = append(escaped, t)
+		if t == "" {
+			continue
 		}
+		// trigram トークナイザーは 3 文字未満のクエリを受け付けない
+		inner := strings.Trim(t, `"`)
+		if utf8.RuneCountInString(inner) < 3 {
+			continue
+		}
+		escaped = append(escaped, t)
 	}
 	if len(escaped) == 0 {
 		return ""

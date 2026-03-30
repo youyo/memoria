@@ -580,6 +580,70 @@ func TestUserPromptRetrieval_ProjectBoostWins(t *testing.T) {
 	}
 }
 
+// --- 日本語 FTS テスト ---
+
+func TestFTSSearch_Japanese(t *testing.T) {
+	sqlDB := testutil.OpenTestDB(t)
+	insertTestProject(t, sqlDB, "proj1", "/test/project")
+	insertTestChunk(t, sqlDB, "chunk1", "proj1", "ワーカーの起動に失敗しました", "ワーカー起動エラー", "failure", 0.8, "project")
+	insertTestChunk(t, sqlDB, "chunk2", "proj1", "SQLite の FTS5 を使った全文検索", "全文検索の実装", "decision", 0.7, "project")
+
+	r := retrieval.New(sqlDB, nil)
+	ctx := context.Background()
+
+	// 「ワーカー」で検索 → 1件ヒット
+	results, err := r.FTSSearch(ctx, "ワーカー", 10)
+	if err != nil {
+		t.Fatalf("FTSSearch Japanese error: %v", err)
+	}
+	if len(results) != 1 {
+		t.Errorf("expected 1 result for 'ワーカー', got %d", len(results))
+	}
+	if len(results) > 0 && results[0].ID != "chunk1" {
+		t.Errorf("expected chunk1, got %q", results[0].ID)
+	}
+
+	// 「全文検索」で検索 → 1件ヒット
+	results2, err := r.FTSSearch(ctx, "全文検索", 10)
+	if err != nil {
+		t.Fatalf("FTSSearch Japanese 2 error: %v", err)
+	}
+	if len(results2) != 1 {
+		t.Errorf("expected 1 result for '全文検索', got %d", len(results2))
+	}
+	if len(results2) > 0 && results2[0].ID != "chunk2" {
+		t.Errorf("expected chunk2, got %q", results2[0].ID)
+	}
+}
+
+func TestFTSSearch_ShortTokenFiltered(t *testing.T) {
+	sqlDB := testutil.OpenTestDB(t)
+	insertTestProject(t, sqlDB, "proj1", "/test/project")
+	insertTestChunk(t, sqlDB, "chunk1", "proj1", "Go is a programming language", "Go lang", "fact", 0.5, "project")
+	insertTestChunk(t, sqlDB, "chunk2", "proj1", "ワーカーの起動に失敗", "ワーカー失敗", "failure", 0.8, "project")
+
+	r := retrieval.New(sqlDB, nil)
+	ctx := context.Background()
+
+	// 「失敗」(2文字) で検索 → 0件（trigram は 3 文字未満をフィルタ）
+	results, err := r.FTSSearch(ctx, "失敗", 10)
+	if err != nil {
+		t.Fatalf("FTSSearch ShortToken error: %v", err)
+	}
+	if len(results) != 0 {
+		t.Errorf("expected 0 results for '失敗' (2-char, filtered), got %d", len(results))
+	}
+
+	// 「Go is」(両方3文字未満) で検索 → 0件
+	results2, err := r.FTSSearch(ctx, "Go is", 10)
+	if err != nil {
+		t.Fatalf("FTSSearch ShortToken2 error: %v", err)
+	}
+	if len(results2) != 0 {
+		t.Errorf("expected 0 results for 'Go is' (all tokens < 3 chars), got %d", len(results2))
+	}
+}
+
 // --- FormatContext テスト ---
 
 func TestFormatContext_Empty(t *testing.T) {
