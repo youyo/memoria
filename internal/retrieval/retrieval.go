@@ -12,6 +12,10 @@ import (
 	"unicode/utf8"
 )
 
+// recencyHalfLifeDays は recency スコアの半減期（日数）。
+// 30日で recency スコアが半減する。
+const recencyHalfLifeDays = 30.0
+
 // Embedder は embedding を取得するためのインターフェース。
 // 本番では embedding.Client が実装し、テストではモックを使う。
 type Embedder interface {
@@ -77,25 +81,25 @@ func (r *Retriever) SessionStart(ctx context.Context, projectID string, similarP
 SELECT c.chunk_id, c.content, c.summary, c.kind, c.importance, c.scope, c.project_id, c.created_at,
        3.0
        + c.importance
-       + (1.0 / (julianday('now') - julianday(c.created_at) + 1)) AS score
+       + (1.0 / (1.0 + (julianday('now') - julianday(c.created_at)) / ?)) AS score
 FROM chunks c
 WHERE c.project_id = ?
 ORDER BY score DESC
 LIMIT ?`
-		rows, err = r.db.QueryContext(ctx, query, projectID, maxResults*3)
+		rows, err = r.db.QueryContext(ctx, query, recencyHalfLifeDays, projectID, maxResults*3)
 	} else if len(similarProjects) == 0 {
 		// 類似プロジェクトなし: same project + global のみ
 		const query = `
 SELECT c.chunk_id, c.content, c.summary, c.kind, c.importance, c.scope, c.project_id, c.created_at,
        CASE WHEN c.project_id = ? THEN 3.0 ELSE 0.0 END
        + c.importance
-       + (1.0 / (julianday('now') - julianday(c.created_at) + 1)) AS score
+       + (1.0 / (1.0 + (julianday('now') - julianday(c.created_at)) / ?)) AS score
 FROM chunks c
 WHERE c.project_id = ?
    OR c.scope = 'global'
 ORDER BY score DESC
 LIMIT ?`
-		rows, err = r.db.QueryContext(ctx, query, projectID, projectID, maxResults*3)
+		rows, err = r.db.QueryContext(ctx, query, projectID, recencyHalfLifeDays, projectID, maxResults*3)
 	} else {
 		// 類似プロジェクトあり: same project + global + similarity_shareable（類似プロジェクトから）
 		// 類似プロジェクト ID を展開して IN 句を構築
@@ -110,7 +114,7 @@ LIMIT ?`
 SELECT c.chunk_id, c.content, c.summary, c.kind, c.importance, c.scope, c.project_id, c.created_at,
        CASE WHEN c.project_id = ? THEN 3.0 ELSE 0.0 END
        + c.importance
-       + (1.0 / (julianday('now') - julianday(c.created_at) + 1)) AS score
+       + (1.0 / (1.0 + (julianday('now') - julianday(c.created_at)) / ?)) AS score
 FROM chunks c
 WHERE c.project_id = ?
    OR c.scope = 'global'
@@ -118,8 +122,8 @@ WHERE c.project_id = ?
 ORDER BY score DESC
 LIMIT ?`, placeholders)
 
-		args := make([]any, 0, 2+len(similarIDs)+1)
-		args = append(args, projectID, projectID)
+		args := make([]any, 0, 3+len(similarIDs)+1)
+		args = append(args, projectID, recencyHalfLifeDays, projectID)
 		for _, id := range similarIDs {
 			args = append(args, id)
 		}
