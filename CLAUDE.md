@@ -112,12 +112,18 @@ SQLite (~/.local/share/memoria/)
 ## Claude Code plugin
 
 ```
-plugin/memoria/
-├── manifest.json   # hook コマンドと skill パスを定義
-└── README.md
+repo-root/
+├── .claude-plugin/
+│   ├── marketplace.json   # マーケットプレイスカタログ
+│   └── plugin.json        # プラグインメタデータ
+├── hooks/
+│   └── hooks.json         # フック定義（4ライフサイクル）
+└── skills/
+    └── memoria/
+        └── SKILL.md       # エージェントスキル
 ```
 
-インストール: `cp -r plugin/memoria ~/.claude/plugins/`
+インストール: `/plugin` → `youyo/memoria` でマーケットプレイスから追加
 
 ## M14 からのハンドオフ（実装済み ベクトル検索最適化 + memory reindex）
 

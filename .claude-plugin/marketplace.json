@@ -1,0 +1,13 @@
+{
+  "name": "youyo-memoria",
+  "owner": {
+    "name": "youyo"
+  },
+  "plugins": [
+    {
+      "name": "memoria",
+      "description": "Project-aware local RAG memory system for Claude Code",
+      "source": "./"
+    }
+  ]
+}

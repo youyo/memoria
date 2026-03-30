@@ -1,12 +1,20 @@
-# memoria Claude Code Plugin
+# memoria Claude Code Plugin — Design Reference
 
-This directory is the Claude Code plugin payload for memoria.
+This directory contains design reference documents for the memoria plugin.
 
-It is intended to distribute:
+The actual plugin files are at the repository root:
 
-- hook integration
-- memory-aware behavior
-- skill guidance
+```
+repo-root/
+├── .claude-plugin/
+│   ├── marketplace.json
+│   └── plugin.json
+├── hooks/
+│   └── hooks.json
+└── skills/
+    └── memoria/
+        └── SKILL.md
+```
 
 ## Hook commands
 
@@ -15,10 +23,6 @@ It is intended to distribute:
 - `memoria hook stop`
 - `memoria hook session-end`
 
-## Install locally
+## Install
 
-```bash
-cp -r plugin/memoria ~/.claude/plugins/
-```
-
-Then enable it inside Claude Code with `/plugin`.
+In Claude Code, run `/plugin` and add marketplace: `youyo/memoria`.

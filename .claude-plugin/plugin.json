@@ -1,0 +1,8 @@
+{
+  "name": "memoria",
+  "description": "Project-aware local RAG memory system for Claude Code",
+  "version": "0.1.1",
+  "author": {
+    "name": "youyo"
+  }
+}
