@@ -6,7 +6,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strconv"
 	"syscall"
 	"time"
 
@@ -82,10 +81,6 @@ func waitForEmbeddingHealthWithClient(ctx context.Context, client *embedding.Cli
 // buildEmbeddingWorkerArgs は uv run の引数スライスを構築する。
 // テスト容易性のために独立関数として抽出する。
 func buildEmbeddingWorkerArgs(cfg *config.Config, sockPath, workerScript string) []string {
-	idleTimeout := cfg.Worker.EmbeddingIdleTimeout
-	if idleTimeout <= 0 {
-		idleTimeout = 600
-	}
 	model := cfg.Embedding.Model
 	if model == "" {
 		model = "cl-nagoya/ruri-v3-30m"
@@ -98,7 +93,6 @@ func buildEmbeddingWorkerArgs(cfg *config.Config, sockPath, workerScript string)
 		"--uds", sockPath,
 		"--model", model,
 		"--preload",
-		"--idle-timeout", strconv.Itoa(idleTimeout),
 	}
 }
 

@@ -11,24 +11,24 @@ import (
 )
 
 // newTestDaemon はテスト用の IngestDaemon を作成する。
-// idleTimeout を短縮して高速なテストを実現する。
-func newTestDaemon(t *testing.T, idleTimeout time.Duration) (*IngestDaemon, *queue.Queue) {
+func newTestDaemon(t *testing.T) (*IngestDaemon, *queue.Queue) {
 	t.Helper()
 	db := testutil.OpenTestDB(t)
 	q := queue.New(db)
 	runDir := t.TempDir()
 	logDir := t.TempDir()
 
-	d := NewIngestDaemon(db, q, runDir, logDir, idleTimeout)
+	d := NewIngestDaemon(db, q, runDir, logDir)
 	// テスト中はログを無視
 	d.SetLogf(func(string, ...any) {})
 	return d, q
 }
 
-func TestDaemonRunIdleTimeout(t *testing.T) {
-	d, _ := newTestDaemon(t, 200*time.Millisecond)
+func TestDaemonRunNoIdleTimeout(t *testing.T) {
+	// idle timeout が廃止されたことを確認: ジョブなしでも context cancel まで止まらない
+	d, _ := newTestDaemon(t)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
 	defer cancel()
 
 	start := time.Now()
@@ -39,15 +39,14 @@ func TestDaemonRunIdleTimeout(t *testing.T) {
 		t.Fatalf("Run: %v", err)
 	}
 
-	// idle timeout (200ms) + ポーリング (500ms) 以内に終了するはず
-	// (上限を余裕を持って 3s に設定)
-	if elapsed > 3*time.Second {
-		t.Errorf("expected idle timeout within 3s, took %v", elapsed)
+	// context タイムアウト (300ms) 付近で終了するはず（idle timeout では終了しない）
+	if elapsed < 200*time.Millisecond {
+		t.Errorf("expected daemon to run until context cancel, but stopped early after %v", elapsed)
 	}
 }
 
 func TestDaemonRunStopFile(t *testing.T) {
-	d, _ := newTestDaemon(t, 30*time.Second) // idle timeout は長めに設定
+	d, _ := newTestDaemon(t)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -77,9 +76,10 @@ func TestDaemonRunStopFile(t *testing.T) {
 }
 
 func TestDaemonCleansUpOnExit(t *testing.T) {
-	d, _ := newTestDaemon(t, 100*time.Millisecond)
+	d, _ := newTestDaemon(t)
 
-	ctx := context.Background()
+	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
+	defer cancel()
 	if err := d.Run(ctx); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -90,11 +90,9 @@ func TestDaemonCleansUpOnExit(t *testing.T) {
 		t.Error("expected pid file to be removed after daemon exit")
 	}
 
-	// worker_leases が削除されていること
-	db := testutil.OpenTestDB(t)
-	_ = db // 別の DB インスタンスでは確認できないため、daemon の DB で確認
-	// daemon の d.db で確認する
-	liveness, _, err := CheckLiveness(ctx, d.db, WorkerNameIngest)
+	// worker_leases が削除されていること（新しい context で確認）
+	queryCtx := context.Background()
+	liveness, _, err := CheckLiveness(queryCtx, d.db, WorkerNameIngest)
 	if err != nil {
 		t.Fatalf("CheckLiveness: %v", err)
 	}
@@ -110,10 +108,10 @@ func TestDaemonDoubleStart(t *testing.T) {
 	runDir := t.TempDir()
 	logDir := t.TempDir()
 
-	d1 := NewIngestDaemon(db, q, runDir, logDir, 30*time.Second)
+	d1 := NewIngestDaemon(db, q, runDir, logDir)
 	d1.SetLogf(func(string, ...any) {})
 
-	d2 := NewIngestDaemon(db, q, runDir, logDir, 30*time.Second)
+	d2 := NewIngestDaemon(db, q, runDir, logDir)
 	d2.SetLogf(func(string, ...any) {})
 
 	ctx, cancel := context.WithCancel(context.Background())

@@ -22,9 +22,10 @@ type LogConfig struct {
 }
 
 // WorkerConfig は Worker 関連の設定。
+// IngestIdleTimeout / EmbeddingIdleTimeout は後方互換のためフィールドを残すが、使用されない（常駐化）。
 type WorkerConfig struct {
-	IngestIdleTimeout    int `toml:"ingest_idle_timeout"`    // 秒。デフォルト 60
-	EmbeddingIdleTimeout int `toml:"embedding_idle_timeout"` // 秒。デフォルト 600
+	IngestIdleTimeout    int `toml:"ingest_idle_timeout"`    // 廃止（後方互換のため残存）
+	EmbeddingIdleTimeout int `toml:"embedding_idle_timeout"` // 廃止（後方互換のため残存）
 }
 
 // EmbeddingConfig は embedding 関連の設定。
@@ -39,8 +40,8 @@ func DefaultConfig() *Config {
 			Level: "info",
 		},
 		Worker: WorkerConfig{
-			IngestIdleTimeout:    60,
-			EmbeddingIdleTimeout: 600,
+			IngestIdleTimeout:    0,
+			EmbeddingIdleTimeout: 0,
 		},
 		Embedding: EmbeddingConfig{
 			Model: "cl-nagoya/ruri-v3-30m",

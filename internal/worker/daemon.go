@@ -16,8 +16,6 @@ import (
 const (
 	// WorkerNameIngest は ingest worker の名前。
 	WorkerNameIngest = "ingest"
-	// DefaultIdleTimeout は ingest worker のデフォルト idle timeout。
-	DefaultIdleTimeout = 60 * time.Second
 	// StopPollInterval は stop ファイルのポーリング間隔。
 	StopPollInterval = 500 * time.Millisecond
 	// DequeueStaleTimeout は Dequeue 時の stale recovery timeout。
@@ -26,26 +24,21 @@ const (
 
 // IngestDaemon は ingest worker のライフサイクルを管理する。
 type IngestDaemon struct {
-	db          *sql.DB
-	q           *queue.Queue
-	runDir      string
-	logDir      string
-	idleTimeout time.Duration
-	logf        func(string, ...any)
-	processor   JobProcessor
+	db        *sql.DB
+	q         *queue.Queue
+	runDir    string
+	logDir    string
+	logf      func(string, ...any)
+	processor JobProcessor
 }
 
 // NewIngestDaemon は IngestDaemon を生成する。
-func NewIngestDaemon(db *sql.DB, q *queue.Queue, runDir, logDir string, idleTimeout time.Duration) *IngestDaemon {
-	if idleTimeout <= 0 {
-		idleTimeout = DefaultIdleTimeout
-	}
+func NewIngestDaemon(db *sql.DB, q *queue.Queue, runDir, logDir string) *IngestDaemon {
 	d := &IngestDaemon{
-		db:          db,
-		q:           q,
-		runDir:      runDir,
-		logDir:      logDir,
-		idleTimeout: idleTimeout,
+		db:     db,
+		q:      q,
+		runDir: runDir,
+		logDir: logDir,
 	}
 	d.logf = func(format string, args ...any) {
 		fmt.Fprintf(os.Stderr, format, args...)
@@ -56,8 +49,8 @@ func NewIngestDaemon(db *sql.DB, q *queue.Queue, runDir, logDir string, idleTime
 
 // NewIngestDaemonWithEmbedding は embedding 付きの IngestDaemon を生成する。
 // embedding worker が UDS 経由で稼働している場合、chunk 保存後に自動で embedding を実行する。
-func NewIngestDaemonWithEmbedding(db *sql.DB, q *queue.Queue, runDir, logDir string, idleTimeout time.Duration, cfg *config.Config) *IngestDaemon {
-	d := NewIngestDaemon(db, q, runDir, logDir, idleTimeout)
+func NewIngestDaemonWithEmbedding(db *sql.DB, q *queue.Queue, runDir, logDir string, cfg *config.Config) *IngestDaemon {
+	d := NewIngestDaemon(db, q, runDir, logDir)
 	d.processor = NewDefaultJobProcessorWithEmbedding(db, cfg, d.logf)
 	return d
 }
@@ -142,10 +135,7 @@ func (d *IngestDaemon) Run(ctx context.Context) error {
 	// 7. watchdog goroutine: stop ファイルを 500ms 間隔でポーリング
 	go d.runWatchdog(mainCtx, cancelMain)
 
-	// 8. メインループ
-	idleTimer := time.NewTimer(d.idleTimeout)
-	defer idleTimer.Stop()
-
+	// 8. メインループ（stop ファイルまたは context キャンセルで終了）
 	d.logf("memoria daemon ingest: started (pid=%d, worker_id=%s)\n", pid, workerID)
 
 	for {
@@ -174,23 +164,11 @@ func (d *IngestDaemon) Run(ctx context.Context) error {
 		}
 
 		if job != nil {
-			// ジョブがあれば idle timer をリセット
-			if !idleTimer.Stop() {
-				select {
-				case <-idleTimer.C:
-				default:
-				}
-			}
-			idleTimer.Reset(d.idleTimeout)
-
-			// ジョブ処理（M08 で本実装）
+			// ジョブ処理
 			d.processJob(mainCtx, job)
 		} else {
-			// ジョブなし: idle timer を確認
+			// ジョブなし: 次のポーリングまで待機（stop ファイルは watchdog が監視）
 			select {
-			case <-idleTimer.C:
-				d.logf("memoria daemon ingest: idle timeout, stopping\n")
-				return nil
 			case <-mainCtx.Done():
 				return nil
 			case <-time.After(StopPollInterval):
@@ -237,6 +215,8 @@ func (d *IngestDaemon) processJob(ctx context.Context, job *queue.Job) {
 		err = d.processor.HandleProjectRefresh(ctx, job)
 	case queue.JobTypeProjectSimilarityRefresh:
 		err = d.processor.HandleProjectSimilarityRefresh(ctx, job)
+	case queue.JobTypeUserPromptIngest:
+		err = d.processor.HandleUserPrompt(ctx, job)
 	default:
 		d.logf("memoria daemon ingest: unknown job type: %s, skipping\n", job.Type)
 		if ackErr := d.q.Ack(ctx, job.ID); ackErr != nil {

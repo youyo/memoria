@@ -11,11 +11,11 @@ func TestDefaultConfig(t *testing.T) {
 	if cfg.Log.Level != "info" {
 		t.Errorf("Log.Level = %q, want %q", cfg.Log.Level, "info")
 	}
-	if cfg.Worker.IngestIdleTimeout != 60 {
-		t.Errorf("Worker.IngestIdleTimeout = %d, want 60", cfg.Worker.IngestIdleTimeout)
+	if cfg.Worker.IngestIdleTimeout != 0 {
+		t.Errorf("Worker.IngestIdleTimeout = %d, want 0 (deprecated)", cfg.Worker.IngestIdleTimeout)
 	}
-	if cfg.Worker.EmbeddingIdleTimeout != 600 {
-		t.Errorf("Worker.EmbeddingIdleTimeout = %d, want 600", cfg.Worker.EmbeddingIdleTimeout)
+	if cfg.Worker.EmbeddingIdleTimeout != 0 {
+		t.Errorf("Worker.EmbeddingIdleTimeout = %d, want 0 (deprecated)", cfg.Worker.EmbeddingIdleTimeout)
 	}
 	if cfg.Embedding.Model != "cl-nagoya/ruri-v3-30m" {
 		t.Errorf("Embedding.Model = %q, want %q", cfg.Embedding.Model, "cl-nagoya/ruri-v3-30m")

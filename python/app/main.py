@@ -1,10 +1,9 @@
 import time
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 
-from app.lifecycle import IdleTimer
 from app.model import ModelManager, ModelNotReadyError
 from app.schemas import EmbedRequest, EmbedResponse, HealthResponse
 
@@ -12,27 +11,18 @@ from app.schemas import EmbedRequest, EmbedResponse, HealthResponse
 def create_app(
     model_name: str = "cl-nagoya/ruri-v3-30m",
     preload: bool = False,
-    idle_timeout: int = 600,
 ) -> FastAPI:
     model_mgr = ModelManager(model_name)
-    idle_timer = IdleTimer(idle_timeout)
     start_time = time.monotonic()
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         if preload:
             model_mgr.preload()
-        idle_timer.start()
         yield
 
     app = FastAPI(lifespan=lifespan)
     app.state.model = model_mgr
-    app.state.idle_timer = idle_timer
-
-    @app.middleware("http")
-    async def touch_idle_timer(request: Request, call_next):
-        idle_timer.touch()
-        return await call_next(request)
 
     @app.get("/health", response_model=HealthResponse)
     async def health():

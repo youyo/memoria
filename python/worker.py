@@ -21,12 +21,6 @@ def parse_args(argv=None) -> argparse.Namespace:
         help="preload model on startup",
     )
     parser.add_argument(
-        "--idle-timeout",
-        type=int,
-        default=600,
-        help="idle timeout in seconds (default: 600)",
-    )
-    parser.add_argument(
         "--pid-file",
         default=None,
         help="PID file path (overrides default)",
@@ -78,7 +72,6 @@ def main() -> None:
     app = create_app(
         model_name=args.model,
         preload=args.preload,
-        idle_timeout=args.idle_timeout,
     )
 
     try:

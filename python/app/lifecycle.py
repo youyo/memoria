@@ -1,39 +1,5 @@
 import fcntl
 import os
-import signal
-import threading
-import time
-
-
-class IdleTimer:
-    """指定された秒数リクエストがない場合に SIGTERM を発火する。"""
-
-    def __init__(self, timeout_seconds: int = 600):
-        self._timeout = timeout_seconds
-        self._last_request_at = time.monotonic()
-        self._lock = threading.Lock()
-
-    def touch(self) -> None:
-        """リクエスト受信時に呼ぶ。"""
-        with self._lock:
-            self._last_request_at = time.monotonic()
-
-    def is_timed_out(self) -> bool:
-        with self._lock:
-            return time.monotonic() - self._last_request_at > self._timeout
-
-    def start(self) -> None:
-        """バックグラウンドスレッドを起動する。daemon=True で本体終了時に自動終了。"""
-        t = threading.Thread(target=self._check_loop, daemon=True)
-        t.start()
-
-    def _check_loop(self) -> None:
-        """10秒おきにタイムアウトをチェックし、超過時に SIGTERM を発火。"""
-        while True:
-            time.sleep(10)
-            if self.is_timed_out():
-                os.kill(os.getpid(), signal.SIGTERM)
-                break
 
 
 class PidFileManager:

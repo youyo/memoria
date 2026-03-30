@@ -23,15 +23,9 @@ def test_parse_args_model():
     assert args.model == "cl-nagoya/ruri-v3-30m"
 
 
-def test_parse_args_timeout():
-    args = parse_args(["--uds", "/tmp/test.sock", "--idle-timeout", "300"])
-    assert args.idle_timeout == 300
-
-
 def test_parse_args_defaults():
     args = parse_args(["--uds", "/tmp/test.sock"])
     assert args.model == "cl-nagoya/ruri-v3-30m"
-    assert args.idle_timeout == 600
 
 
 def test_parse_args_pid_file():

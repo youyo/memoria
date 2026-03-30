@@ -1,29 +1,8 @@
 import os
-import time
 
 import pytest
 
-from app.lifecycle import IdleTimer, LockManager, PidFileManager
-
-
-def test_idle_timer_no_timeout():
-    timer = IdleTimer(timeout_seconds=600)
-    timer.touch()
-    assert not timer.is_timed_out()
-
-
-def test_idle_timer_timeout():
-    timer = IdleTimer(timeout_seconds=1)
-    timer._last_request_at = time.monotonic() - 2
-    assert timer.is_timed_out()
-
-
-def test_idle_timer_touch_resets():
-    timer = IdleTimer(timeout_seconds=1)
-    timer._last_request_at = time.monotonic() - 2
-    assert timer.is_timed_out()
-    timer.touch()
-    assert not timer.is_timed_out()
+from app.lifecycle import LockManager, PidFileManager
 
 
 def test_pid_file_write_and_cleanup(tmp_path):

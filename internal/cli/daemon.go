@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"time"
 
 	"github.com/youyo/memoria/internal/config"
 	"github.com/youyo/memoria/internal/db"
@@ -36,11 +35,6 @@ func (c *DaemonIngestCmd) Run(globals *Globals, cfg *config.Config, w *io.Writer
 	runDir := config.RunDir()
 	logDir := config.LogDir()
 
-	idleTimeout := time.Duration(cfg.Worker.IngestIdleTimeout) * time.Second
-	if idleTimeout <= 0 {
-		idleTimeout = worker.DefaultIdleTimeout
-	}
-
-	daemon := worker.NewIngestDaemon(database.SQL(), q, runDir, logDir, idleTimeout)
+	daemon := worker.NewIngestDaemonWithEmbedding(database.SQL(), q, runDir, logDir, cfg)
 	return daemon.Run(context.Background())
 }

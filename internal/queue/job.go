@@ -10,6 +10,7 @@ const (
 	JobTypeSessionEndIngest         JobType = "session_end_ingest"
 	JobTypeProjectRefresh           JobType = "project_refresh"
 	JobTypeProjectSimilarityRefresh JobType = "project_similarity_refresh"
+	JobTypeUserPromptIngest         JobType = "user_prompt_ingest"
 )
 
 // Status はジョブの状態を表す。

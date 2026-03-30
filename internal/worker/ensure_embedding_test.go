@@ -132,7 +132,7 @@ func TestWaitForEmbeddingHealth_Timeout(t *testing.T) {
 
 func TestBuildEmbeddingWorkerArgs(t *testing.T) {
 	cfg := &config.Config{
-		Worker:    config.WorkerConfig{EmbeddingIdleTimeout: 600},
+		Worker:    config.WorkerConfig{},
 		Embedding: config.EmbeddingConfig{Model: "cl-nagoya/ruri-v3-30m"},
 	}
 	args := buildEmbeddingWorkerArgs(cfg, "/tmp/test.sock", "/path/to/worker.py")
@@ -145,20 +145,21 @@ func TestBuildEmbeddingWorkerArgs(t *testing.T) {
 	if !slices.Contains(args, "--model") {
 		t.Error("expected --model in args")
 	}
-	if !slices.Contains(args, "600") {
-		t.Error("expected idle-timeout 600 in args")
+	// --idle-timeout は廃止されたため args に含まれないことを確認
+	if slices.Contains(args, "--idle-timeout") {
+		t.Error("expected --idle-timeout NOT to be in args (deprecated)")
 	}
 }
 
 func TestBuildEmbeddingWorkerArgs_Defaults(t *testing.T) {
 	cfg := config.DefaultConfig()
-	cfg.Worker.EmbeddingIdleTimeout = 0 // デフォルト値テスト
 	cfg.Embedding.Model = ""
 	args := buildEmbeddingWorkerArgs(cfg, "/tmp/test.sock", "/path/to/worker.py")
-	if !slices.Contains(args, "600") {
-		t.Error("expected default idle-timeout 600 in args")
-	}
 	if !slices.Contains(args, "cl-nagoya/ruri-v3-30m") {
 		t.Error("expected default model in args")
+	}
+	// --idle-timeout は廃止されたため args に含まれないことを確認
+	if slices.Contains(args, "--idle-timeout") {
+		t.Error("expected --idle-timeout NOT to be in args (deprecated)")
 	}
 }

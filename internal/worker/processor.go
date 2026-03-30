@@ -17,14 +17,16 @@ type JobProcessor interface {
 	HandleSessionEnd(ctx context.Context, job *queue.Job) error
 	HandleProjectRefresh(ctx context.Context, job *queue.Job) error
 	HandleProjectSimilarityRefresh(ctx context.Context, job *queue.Job) error
+	HandleUserPrompt(ctx context.Context, job *queue.Job) error
 }
 
 // DefaultJobProcessor は CheckpointHandler と SessionEndHandler を使った実装。
 type DefaultJobProcessor struct {
-	checkpoint         *CheckpointHandler
-	sessionEnd         *SessionEndHandler
-	projectRefresh     *ProjectRefreshHandler
-	similarityRefresh  *ProjectSimilarityRefreshHandler
+	checkpoint        *CheckpointHandler
+	sessionEnd        *SessionEndHandler
+	projectRefresh    *ProjectRefreshHandler
+	similarityRefresh *ProjectSimilarityRefreshHandler
+	userPrompt        *UserPromptHandler
 }
 
 // NewDefaultJobProcessor は embedding なし（後方互換）の DefaultJobProcessor を生成する。
@@ -35,6 +37,7 @@ func NewDefaultJobProcessor(db *sql.DB) *DefaultJobProcessor {
 		sessionEnd:        NewSessionEndHandler(db),
 		projectRefresh:    NewProjectRefreshHandler(db, nil, "", nil),
 		similarityRefresh: NewProjectSimilarityRefreshHandler(db, nil),
+		userPrompt:        NewUserPromptHandler(db),
 	}
 }
 
@@ -55,6 +58,7 @@ func NewDefaultJobProcessorWithEmbedding(db *sql.DB, cfg *config.Config, logf fu
 		sessionEnd:        NewSessionEndHandlerWithEmbedder(db, embedder, model, logf),
 		projectRefresh:    NewProjectRefreshHandler(db, embeddingClient, model, logf),
 		similarityRefresh: NewProjectSimilarityRefreshHandler(db, logf),
+		userPrompt:        NewUserPromptHandlerWithEmbedder(db, embedder, model, logf),
 	}
 }
 
@@ -76,4 +80,9 @@ func (p *DefaultJobProcessor) HandleProjectRefresh(ctx context.Context, job *que
 // HandleProjectSimilarityRefresh は project_similarity_refresh ジョブを処理する。
 func (p *DefaultJobProcessor) HandleProjectSimilarityRefresh(ctx context.Context, job *queue.Job) error {
 	return p.similarityRefresh.Handle(ctx, job)
+}
+
+// HandleUserPrompt は user_prompt_ingest ジョブを処理する。
+func (p *DefaultJobProcessor) HandleUserPrompt(ctx context.Context, job *queue.Job) error {
+	return p.userPrompt.Handle(ctx, job)
 }

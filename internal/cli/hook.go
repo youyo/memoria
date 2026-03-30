@@ -60,12 +60,22 @@ type HookSessionStartInput struct {
 type HookSessionStartCmd struct{}
 
 // Run は session-start hook を実行する（os.Stdin から読み取る）。
-func (c *HookSessionStartCmd) Run(globals *Globals, w *io.Writer, lazyDB *LazyDB) error {
+func (c *HookSessionStartCmd) Run(globals *Globals, w *io.Writer, lazyDB *LazyDB, cfg *cfg_pkg.Config) error {
+	// embedding worker の起動保証（fire-and-forget）
+	go func() {
+		spawnCtx, spawnCancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer spawnCancel()
+		if cfg != nil {
+			worker.SpawnEmbeddingIfNeeded(spawnCtx, cfg) //nolint:errcheck
+		}
+	}()
+
 	database, err := lazyDB.Get()
 	if err != nil {
 		return writeHookOutput(*w, "SessionStart", "")
 	}
-	return c.RunWithReader(globals, *w, os.Stdin, database.SQL(), nil)
+	embedder := newEmbedderFromConfig(cfg)
+	return c.RunWithReader(globals, *w, os.Stdin, database.SQL(), embedder)
 }
 
 // RunWithReader はテスト可能な実装。
@@ -120,6 +130,15 @@ type HookUserPromptInput struct {
 	Prompt    string `json:"prompt"`
 }
 
+// UserPromptPayload は user_prompt_ingest ジョブの payload。
+type UserPromptPayload struct {
+	SessionID  string    `json:"session_id"`
+	ProjectID  string    `json:"project_id"`
+	Cwd        string    `json:"cwd"`
+	Prompt     string    `json:"prompt"`
+	CapturedAt time.Time `json:"captured_at"`
+}
+
 // HookUserPromptCmd は user-prompt hook コマンド。
 type HookUserPromptCmd struct{}
 
@@ -171,6 +190,29 @@ func (c *HookUserPromptCmd) RunWithReader(globals *Globals, w io.Writer, reader 
 	}
 
 	additionalContext := retrieval.FormatContext(results)
+
+	// UserPrompt の非同期 ingest（hook 応答を block しない）
+	go func() {
+		enqCtx, enqCancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer enqCancel()
+		payload := UserPromptPayload{
+			SessionID:  input.SessionID,
+			ProjectID:  projectID,
+			Cwd:        input.Cwd,
+			Prompt:     input.Prompt,
+			CapturedAt: time.Now().UTC(),
+		}
+		payloadJSON, err := json.Marshal(payload)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "memoria hook user-prompt: marshal ingest payload: %v\n", err)
+			return
+		}
+		enqQueue := queue.New(sqlDB)
+		if _, err := enqQueue.Enqueue(enqCtx, queue.JobTypeUserPromptIngest, string(payloadJSON)); err != nil {
+			fmt.Fprintf(os.Stderr, "memoria hook user-prompt: enqueue user_prompt_ingest: %v\n", err)
+		}
+	}()
+
 	return writeHookOutput(w, "UserPromptSubmit", additionalContext)
 }
 
