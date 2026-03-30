@@ -9,6 +9,9 @@ import (
 	"github.com/youyo/memoria/internal/retrieval"
 )
 
+// EmbedBatchSize は embedding worker の上限値（Pydantic の バリデーション上限）。
+const EmbedBatchSize = 64
+
 // EmbedClient は embedding worker への通信インターフェース。
 // embedding.Client の必要なメソッドのみを定義し、テスト時にモック可能にする。
 type EmbedClient interface {
@@ -73,24 +76,31 @@ func (e *ChunkEmbedder) EmbedChunks(ctx context.Context, db *sql.DB, chunkIDs []
 		return nil
 	}
 
-	// バッチ embedding
-	// TODO: MVP では全件一括。件数が多い場合はバッチサイズ上限を設けること（将来の拡張ポイント）
-	embeddings, err := e.client.Embed(ctx, contents)
-	if err != nil {
-		return fmt.Errorf("embed chunks: %w", err)
+	// バッチ分割 embedding（Python worker の上限 64 件に合わせる）
+	var allEmbeddings [][]float32
+	for i := 0; i < len(contents); i += EmbedBatchSize {
+		end := i + EmbedBatchSize
+		if end > len(contents) {
+			end = len(contents)
+		}
+		batch, err := e.client.Embed(ctx, contents[i:end])
+		if err != nil {
+			return fmt.Errorf("embed chunks (batch %d-%d): %w", i, end, err)
+		}
+		allEmbeddings = append(allEmbeddings, batch...)
 	}
 
-	if len(embeddings) != len(orderedIDs) {
-		return fmt.Errorf("embedding count mismatch: expected %d, got %d", len(orderedIDs), len(embeddings))
+	if len(allEmbeddings) != len(orderedIDs) {
+		return fmt.Errorf("embedding count mismatch: expected %d, got %d", len(orderedIDs), len(allEmbeddings))
 	}
 
 	// 結果を chunk_embeddings に保存（JSON + blob の両形式で保存）
 	for i, chunkID := range orderedIDs {
-		jsonBytes, err := json.Marshal(embeddings[i])
+		jsonBytes, err := json.Marshal(allEmbeddings[i])
 		if err != nil {
 			return fmt.Errorf("marshal embedding for chunk %s: %w", chunkID, err)
 		}
-		blob := retrieval.Float32SliceToBytes(embeddings[i])
+		blob := retrieval.Float32SliceToBytes(allEmbeddings[i])
 
 		const insertQuery = `
 INSERT OR IGNORE INTO chunk_embeddings (chunk_id, model, embedding_json, embedding_blob, created_at)

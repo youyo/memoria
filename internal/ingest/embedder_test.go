@@ -3,6 +3,7 @@ package ingest_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 
 	"github.com/youyo/memoria/internal/ingest"
@@ -280,5 +281,79 @@ func TestEmbedChunks_Idempotent(t *testing.T) {
 	}
 	if count != 1 {
 		t.Errorf("expected 1 chunk_embedding (idempotent), got %d", count)
+	}
+}
+
+func TestEmbedChunks_BatchSplit(t *testing.T) {
+	db := testutil.OpenTestDB(t)
+	ctx := context.Background()
+
+	// プロジェクトとセッションを挿入
+	_, _ = db.ExecContext(ctx,
+		`INSERT INTO projects (project_id, project_root, last_seen_at, created_at) VALUES ('p1', '/tmp/p1', strftime('%Y-%m-%dT%H:%M:%SZ','now'), strftime('%Y-%m-%dT%H:%M:%SZ','now'))`)
+	_, _ = db.ExecContext(ctx,
+		`INSERT INTO sessions (session_id, project_id, cwd) VALUES ('s1', 'p1', '/tmp/p1')`)
+
+	// 70 個の chunk を作成（バッチサイズ 64 を超える）
+	chunkIDs := make([]string, 70)
+	for i := 0; i < 70; i++ {
+		chunkID := fmt.Sprintf("chunk-batch-%03d", i)
+		chunkIDs[i] = chunkID
+		_, err := db.ExecContext(ctx,
+			`INSERT INTO chunks (chunk_id, session_id, project_id, content, summary, kind, importance, scope, project_transferability, keywords_json, applies_to_json, content_hash, created_at)
+			 VALUES (?, 's1', 'p1', ?, '', 'fact', 0.5, 'project', 0.5, '[]', '[]', ?, strftime('%Y-%m-%dT%H:%M:%SZ','now'))`,
+			chunkID, fmt.Sprintf("content %d", i), fmt.Sprintf("hash-%d", i),
+		)
+		if err != nil {
+			t.Fatalf("insert chunk %s: %v", chunkID, err)
+		}
+	}
+
+	// モック：各呼び出しで texts の長さが 64 以下であることを検証
+	embedCallCount := 0
+	callTextsLengths := make([]int, 0)
+	mock := &mockEmbedClient{
+		embedFn: func(ctx context.Context, texts []string) ([][]float32, error) {
+			embedCallCount++
+			callTextsLengths = append(callTextsLengths, len(texts))
+			if len(texts) > ingest.EmbedBatchSize {
+				t.Errorf("Embed call %d: got %d texts, expected <= %d", embedCallCount, len(texts), ingest.EmbedBatchSize)
+			}
+			return dummyEmbeddings(texts), nil
+		},
+	}
+	embedder := ingest.NewChunkEmbedder(mock)
+
+	// EmbedChunks を実行
+	err := embedder.EmbedChunks(ctx, db, chunkIDs, "test-model")
+	if err != nil {
+		t.Fatalf("EmbedChunks: %v", err)
+	}
+
+	// Embed が 2 回呼ばれたことを確認（64 + 6）
+	if embedCallCount != 2 {
+		t.Errorf("expected Embed called 2 times, got %d", embedCallCount)
+	}
+
+	// 各呼び出しのサイズを検証
+	if len(callTextsLengths) != 2 {
+		t.Errorf("expected 2 calls recorded, got %d", len(callTextsLengths))
+	} else {
+		if callTextsLengths[0] != 64 {
+			t.Errorf("1st call: expected 64 texts, got %d", callTextsLengths[0])
+		}
+		if callTextsLengths[1] != 6 {
+			t.Errorf("2nd call: expected 6 texts, got %d", callTextsLengths[1])
+		}
+	}
+
+	// chunk_embeddings に 70 件が全て保存されていること
+	var count int
+	row := db.QueryRowContext(ctx, "SELECT COUNT(*) FROM chunk_embeddings")
+	if err := row.Scan(&count); err != nil {
+		t.Fatalf("count chunk_embeddings: %v", err)
+	}
+	if count != 70 {
+		t.Errorf("expected 70 chunk_embeddings, got %d", count)
 	}
 }
