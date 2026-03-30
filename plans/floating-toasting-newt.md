@@ -1,69 +1,80 @@
-# PR #1 未対応コメント修正プラン
+# README セットアップ手順の簡素化
 
 ## Context
 
-PR #1（`fix: restructure plugin/memoria to official Claude Code plugin format`）に対して youyo と Copilot から指摘があり、うち1件（ルート `skills/memoria/SKILL.md` の削除）は対応済みだが、残り3点が未対応。加えて、スキルファイルの配置が公式仕様と異なることが判明。この修正で PR を公式仕様準拠＆マージ可能な状態にする。
+`memoria config init` と `memoria config print-hook` は不要（config 未作成でもデフォルト値で動作、hook 設定はプラグインが自動提供）。
+Homebrew は「予定」ではなく既にリリース済み。セットアップ手順を2ステップに簡素化する。
 
-## 修正対象（4点）
+## 修正内容
 
-### 1. スキルファイルを公式仕様の配置に移動
+### README.md
 
-**問題:** 現在 `plugin/memoria/skills/memoria.md`（フラット）だが、公式仕様は `skills/<name>/SKILL.md`（ネスト構造）。
-**修正:** `plugin/memoria/skills/memoria.md` → `plugin/memoria/skills/memoria/SKILL.md` に移動。
+```markdown
+## Installation
 
-**操作:**
-- `plugin/memoria/skills/memoria.md` を削除
-- `plugin/memoria/skills/memoria/SKILL.md` を作成（同一内容）
+### Homebrew
 
-### 2. `docs/specs/plugin/memoria/manifest.json` → 有効な JSON に変換
+\```bash
+brew install youyo/tap/memoria
+\```
 
-**問題:** プレーンテキストに書き換えられたが `.json` 拡張子のまま。JSON として無効。
-**修正:** 有効な JSON 構造に書き換え、ディレクトリ構造も公式仕様に合わせる。
+### Go install
 
-```json
-{
-  "note": "This file is a design reference only. The actual plugin uses the standard Claude Code plugin structure.",
-  "structure": [
-    "plugin/memoria/",
-    ".claude-plugin/plugin.json          # Plugin metadata",
-    "hooks/hooks.json                    # Hook definitions",
-    "skills/memoria/SKILL.md             # Agent skill",
-    "README.md                           # Plugin documentation"
-  ]
-}
+\```bash
+go install github.com/youyo/memoria@latest
+\```
+
+## Setup
+
+In Claude Code:
+
+\```text
+/plugin
+\```
+
+Add marketplace: `youyo/memoria`, then enable the plugin.
+
+That's it. Database, migrations, and workers are initialized automatically on first use.
 ```
 
-**ファイル:** `docs/specs/plugin/memoria/manifest.json`
+### README.ja.md
 
-### 3. README のリンク切れ修正
+```markdown
+## インストール
 
-**問題:** `skills/memoria/SKILL.md` は削除済みだが、README.md / README.ja.md がまだ参照している。
-**修正:** パスを `plugin/memoria/skills/memoria/SKILL.md` に更新。
+### Homebrew
 
-**ファイル:**
-- `README.md`: `skills/memoria/SKILL.md` → `plugin/memoria/skills/memoria/SKILL.md`
-- `README.ja.md`: `skills/memoria/SKILL.md` → `plugin/memoria/skills/memoria/SKILL.md`
+\```bash
+brew install youyo/tap/memoria
+\```
 
-### 4. `docs/specs/skills/memoria/SKILL.md` の重複解消
+### Go
 
-**問題:** `docs/specs/skills/memoria/SKILL.md` と `plugin/memoria/skills/memoria.md` が完全同一内容。
-**修正:** `plugin/memoria/skills/memoria/SKILL.md` を正本とし、`docs/specs/skills/memoria/SKILL.md` を削除。README のリンクは修正3で plugin 側を指すようにしている。
+\```bash
+go install github.com/youyo/memoria@latest
+\```
 
-**ファイル:** `docs/specs/skills/memoria/SKILL.md` を削除
+## セットアップ
 
-## 作業手順
+Claude Code 上で:
 
-1. PR ブランチ `copilot/check-claudecode-plugin-installation` をチェックアウト
-2. `plugin/memoria/skills/memoria.md` → `plugin/memoria/skills/memoria/SKILL.md` に移動
-3. `docs/specs/plugin/memoria/manifest.json` を有効な JSON に書き換え
-4. `README.md` / `README.ja.md` のスキルパス参照を更新
-5. `docs/specs/skills/memoria/SKILL.md` を削除
-6. コミット＆プッシュ
+\```text
+/plugin
+\```
 
-## 検証
+マーケットプレイスに `youyo/memoria` を追加し、プラグインを有効化します。
 
-- `python3 -m json.tool docs/specs/plugin/memoria/manifest.json` で JSON 有効性確認
-- `grep -r 'skills/memoria/SKILL.md'` で旧パス参照が残っていないことを確認（plugin 配下のみ正当）
-- `grep -r 'skills/memoria.md'` でフラット配置の参照が残っていないことを確認
-- `docs/specs/skills/memoria/SKILL.md` が存在しないことを確認
-- `plugin/memoria/skills/memoria/SKILL.md` が存在することを確認
+データベース・マイグレーション・worker は初回利用時に自動で初期化されます。
+```
+
+## 変更点
+
+- `config init` / `config print-hook` ステップを削除
+- Homebrew を「予定」→ 正式に第一選択肢として記載
+- 「自動初期化」の説明を1行追加
+- Go install は Homebrew の後に記載（推奨順）
+
+## ファイル
+
+- `README.md`
+- `README.ja.md`

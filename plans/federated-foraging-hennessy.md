@@ -1,141 +1,116 @@
 ---
-title: FTS5 日本語検索対応 — trigram トークナイザー移行
+title: /memoria:timeline スキル追加
 project: memoria
 author: planning-agent
-created: 2026-03-30
+created: 2026-03-31
 status: Draft
-complexity: M
+complexity: L
 ---
 
-# FTS5 日本語検索対応: trigram トークナイザー移行
+# /memoria:timeline スキル追加
 
 ## Context
 
-memoria の FTS5 全文検索テーブル `chunks_fts` はデフォルトの `unicode61` トークナイザーを使用している。`unicode61` は空白区切りでトークン化するため、日本語のように空白なしで連続する文字列を正しくトークン化できず、「ワーカー」「健全性チェック」などの日本語クエリで `no results` になる。
+claude-mem の `timeline` ツール相当の機能を memoria のプラグインスキルとして追加する。これにより memoria が claude-mem の代替として機能する範囲が広がる。
 
-`trigram` トークナイザーに変更することで、3文字以上の部分文字列マッチが可能になり、日本語検索が正常に動作する。modernc.org/sqlite（Pure Go）での動作は検証済み。
+claude-mem の timeline: 特定の observation ID を anchor に前後のコンテキストを取得する MCP ツール。
 
-## スコープ
+memoria の既存資産:
+- `memoria memory list` — 時系列降順で chunk を一覧表示（`--project`, `--kind`, `--limit` フィルタ対応）
+- `memoria memory get <chunk_id>` — 特定の chunk を ID で取得
+- `memoria memory search <query>` — FTS + vector 検索
+- `skills/search/SKILL.md` — `/memoria:search` スキル（実装済み）
 
-### 実装範囲
-- マイグレーション 0003: `chunks_fts` を trigram トークナイザーで再作成
-- `FTSSearch()`: bm25 → 位置ベーススコアに変更（trigram は bm25 非対応）
-- `buildFTSQuery()`: 3文字未満トークンのフィルタリング追加
-- テスト: 日本語 FTS テスト追加、スキーマバージョン更新
-
-### スコープ外
-- ベクトル検索の変更（変更なし）
-- RRF マージロジックの変更（変更なし）
-- 既存の英語テストの変更（そのまま動作する）
-
-## 変更ファイル一覧
+## 変更ファイル
 
 | ファイル | 操作 | 概要 |
 |---------|------|------|
-| `internal/db/migrations/0003_trigram_fts.sql` | 新規 | trigram マイグレーション |
-| `internal/retrieval/retrieval.go` | 修正 | FTSSearch + buildFTSQuery |
-| `internal/retrieval/retrieval_test.go` | 修正 | 日本語テスト追加 |
-| `internal/db/migrate_test.go` | 修正 | スキーマバージョン 2→3 |
+| `skills/timeline/SKILL.md` | 新規 | `/memoria:timeline` スキル定義 |
 
 ## 実装手順
 
-### Step 1: マイグレーション `0003_trigram_fts.sql`
+### Step 1: `skills/timeline/SKILL.md` 新規作成
 
-トリガー削除 → FTS テーブル再作成 → トリガー再作成 → インデックス再構築。
+`memoria memory list` を活用し、日付・kind・プロジェクトでフィルタ可能なタイムラインビュー。
 
-```sql
--- 1. トリガー削除
-DROP TRIGGER IF EXISTS chunks_fts_insert;
-DROP TRIGGER IF EXISTS chunks_fts_delete;
-DROP TRIGGER IF EXISTS chunks_fts_update;
+```yaml
+---
+name: timeline
+description: Show a chronological timeline of memoria's stored memories. Use when reviewing what happened in recent sessions, understanding project history over time, or getting an overview of stored knowledge. Supports filtering by kind and project.
+argument-hint: [--kind <kind>] [--limit <n>]
+allowed-tools: Bash(memoria *)
+---
 
--- 2. FTS テーブル再作成（trigram）
-DROP TABLE IF EXISTS chunks_fts;
-CREATE VIRTUAL TABLE chunks_fts USING fts5(
-    content, summary, keywords,
-    content='chunks', content_rowid='rowid',
-    tokenize='trigram'
-);
+Show a chronological timeline of memories stored in memoria.
 
--- 3. トリガー再作成（0001 と同一）
--- INSERT / DELETE / UPDATE の3トリガー
+## Execution
 
--- 4. インデックス再構築
-INSERT INTO chunks_fts(chunks_fts) VALUES('rebuild');
+Run the appropriate command based on arguments:
+
+Default (recent 20 entries):
+\`\`\`bash
+memoria memory list --limit 20
+\`\`\`
+
+With kind filter:
+\`\`\`bash
+memoria memory list --kind $ARGUMENTS[0] --limit 20
+\`\`\`
+
+With limit:
+\`\`\`bash
+memoria memory list --limit $ARGUMENTS[0]
+\`\`\`
+
+Parse $ARGUMENTS flexibly:
+- If a number is given, use it as --limit
+- If a kind name is given (decision/constraint/todo/failure/fact/preference/pattern), use it as --kind
+- If both are given, apply both
+- If "all" is given, use --limit 100
+
+Present results as a formatted timeline with timestamps, kinds, and summaries.
+For each entry, show the chunk_id prefix (first 8 chars) so the user can drill down with `/memoria:search` or `memoria memory get`.
+
+## When to use
+
+- Reviewing what happened in recent sessions
+- Getting an overview of stored decisions and constraints
+- Understanding the chronological flow of a project
+- Checking what memories exist before searching for specific ones
+
+## Output format
+
+Present as a clean timeline:
+\`\`\`
+[2026-03-30] 🔴 decision  abc12345  stakeholder と議論し requirement を decided
+[2026-03-30] 🟡 pattern   def67890  func handleError() で panic: を workaround した
+[2026-03-29] 🔵 fact      ghi24680  SQLite の FTS5 を使った全文検索の実装
+\`\`\`
 ```
 
-### Step 2: `retrieval.go` — FTSSearch のスコアリング変更
+## CI 修正（v0.2.0 で発生）
 
-**変更理由**: trigram トークナイザーは `bm25()` 非対応。
+`internal/cli/daemon_test.go` の `TestDaemonSubcommand_Help` が CI で 120秒タイムアウト。idle timeout 廃止で daemon が永久実行になり、`--help` でも `Run()` が呼ばれて daemon が起動してしまう。
 
-- SQL から `bm25(chunks_fts) as fts_score` を削除
-- `ORDER BY c.created_at DESC` に変更（recency ベース）
-- Scan から `ftsScore` を削除
-- 結果に位置ベーススコアを付与: `rr.Score = 1.0 / float64(i+1)`
+修正: テストで daemon 実行を避けるため、`--help` の結果を parse だけで確認するか、テスト自体にタイムアウトを設定。
 
-RRF マージで vector search と合成されるため、FTS 単体の精密なランキングは不要。
+## 変更ファイル（追加）
 
-### Step 3: `retrieval.go` — buildFTSQuery の 3 文字フィルタ
-
-**変更理由**: trigram は 3 文字未満のクエリでエラーになる。
-
-- `unicode/utf8` をインポート
-- `escapeFTSToken` 後、引用符を除いた内容が `utf8.RuneCountInString(inner) < 3` ならスキップ
-- 全トークンがフィルタされた場合は空文字列を返す（vector search にフォールバック）
-
-### Step 4: テスト追加・更新
-
-- `migrate_test.go`: スキーマバージョン `2 → 3` に更新
-- `retrieval_test.go`: 日本語 FTS テスト追加
-
-## テスト設計書
-
-### 正常系
-
-| ID | 入力 | 期待出力 |
-|----|------|---------|
-| J1 | chunk=「ワーカーの起動に失敗しました」, query=「ワーカー」 | 1件ヒット |
-| J2 | chunk=「SQLite の FTS5 を使った全文検索」, query=「全文検索」 | 1件ヒット |
-| J3 | chunk=「SQLite の FTS5」, query=「SQLite」 | 1件ヒット（英語6文字） |
-| J4 | chunk=「ワーカーの起動に失敗」, query=「起動に失敗」 | 1件ヒット |
-
-### 異常系・エッジケース
-
-| ID | 入力 | 期待出力 | 理由 |
-|----|------|---------|------|
-| E1 | query=「Go is」 | 0件（空） | 全トークン < 3文字 |
-| E2 | query=「失敗」 | 0件（空） | 2文字 < 3文字最小 |
-| E3 | query=「AI Go ワーカー」 | 「ワーカー」のみで検索 | 短いトークンをフィルタ |
-
-## リスク評価
-
-| リスク | 重大度 | 対策 |
-|--------|--------|------|
-| trigram で bm25 不可 | 中 | 位置ベーススコア + RRF で補完 |
-| 3文字未満の英語トークン（Go, AI等）がFTS検索不可 | 低 | vector search でカバー |
-| trigram インデックスサイズ増大 | 低 | 個人用DB、データ量小 |
-| 部分文字列マッチで false positive 増加 | 低 | RRF + vector で精度補完 |
+| ファイル | 操作 | 概要 |
+|---------|------|------|
+| `internal/cli/daemon_test.go` | 修正 | TestDaemonSubcommand_Help のタイムアウト対策 |
 
 ## 検証手順
 
 ```bash
-# 1. 全テスト実行
-go test ./... -v
+# 1. CI 修正確認
+go test ./internal/cli/ -v -run TestDaemon -timeout 30s
 
-# 2. 日本語検索テスト
-go test ./internal/retrieval/ -run TestFTSSearch_Japanese -v
-
-# 3. 手動検証（実装後）
-memoria memory search "ワーカー" --limit 5
-memoria memory search "起動" --limit 5
+# 2. プラグイン再インストール後
+# Claude Code で /memoria:timeline を実行
+# Claude Code で /memoria:timeline decision を実行
+# Claude Code で /memoria:timeline 50 を実行
 ```
-
-## チェックリスト
-- [x] 観点1: 実装実現可能性（手順の一貫性、ファイル網羅）
-- [x] 観点2: TDDテスト設計（正常系4件、異常系3件）
-- [x] 観点3: アーキテクチャ整合性（既存マイグレーションパターン踏襲）
-- [x] 観点4: リスク評価と対策（4項目）
-- [x] 観点5: シーケンス図 — N/A（単純なスキーマ変更+クエリ修正、複雑なフローなし）
 
 ---
 ## Next Action
