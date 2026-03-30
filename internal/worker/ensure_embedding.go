@@ -101,7 +101,10 @@ func findWorkerScript() (string, error) {
 
 	if execPath, err := os.Executable(); err == nil {
 		if realPath, err := filepath.EvalSymlinks(execPath); err == nil {
-			candidates = append(candidates, filepath.Join(filepath.Dir(realPath), "python", "worker.py"))
+			binDir := filepath.Dir(realPath)
+			candidates = append(candidates, filepath.Join(binDir, "python", "worker.py"))
+			// Homebrew: bin/../libexec/python/worker.py
+			candidates = append(candidates, filepath.Join(binDir, "..", "libexec", "python", "worker.py"))
 		}
 	}
 

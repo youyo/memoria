@@ -134,7 +134,11 @@ func spawnDaemon(ctx context.Context) {
 	}
 	defer logFile.Close()
 
-	execPath := os.Args[0]
+	execPath, err := os.Executable()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "memoria: ensureIngest: resolve executable path: %v\n", err)
+		return
+	}
 	attr := &os.ProcAttr{
 		Files: []*os.File{nil, logFile, logFile},
 		Sys: &syscall.SysProcAttr{

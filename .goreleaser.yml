@@ -32,7 +32,7 @@ archives:
       - README.md
       - README.ja.md
       - LICENSE*
-      - plugin/**
+      - python/**
 
 checksum:
   name_template: "{{ .ProjectName }}_{{ .Version }}_checksums.txt"
@@ -61,3 +61,4 @@ brews:
       system "#{bin}/memoria version"
     install: |
       bin.install "memoria"
+      (libexec/"python").install Dir["python/*"]
