@@ -186,7 +186,10 @@ func spawnEmbeddingWorker(cfg *config.Config) error {
 
 	workerArgs := buildEmbeddingWorkerArgs(cfg, sockPath, workerScript)
 	args := append([]string{uvPath}, workerArgs...)
+	venvPath := filepath.Join(config.StateDir(), "python-venv")
+	env := append(os.Environ(), "UV_PROJECT_ENVIRONMENT="+venvPath)
 	attr := &os.ProcAttr{
+		Env:   env,
 		Files: []*os.File{nil, logFile, logFile},
 		Sys:   &syscall.SysProcAttr{Setsid: true},
 	}

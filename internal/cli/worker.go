@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sync"
 	"syscall"
 	"time"
 
@@ -31,21 +32,33 @@ type WorkerStartCmd struct{}
 
 // Run は worker start を実行する（本番用: DB を自動オープン）。
 func (c *WorkerStartCmd) Run(globals *Globals, w *io.Writer) error {
-	ingestCtx, ingestCancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer ingestCancel()
+	cfg, _ := config.Load(config.ConfigFile())
 
-	worker.EnsureIngest(ingestCtx)
+	var wg sync.WaitGroup
 
-	// embedding worker は初回起動時に venv 作成 + モデルロードが必要なため長めのタイムアウト
-	embeddingCtx, embeddingCancel := context.WithTimeout(context.Background(), 120*time.Second)
-	defer embeddingCancel()
+	// ingest worker を並列起動
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		worker.EnsureIngest(ctx)
+	}()
 
-	cfg, cfgErr := config.Load(config.ConfigFile())
-	if cfgErr == nil {
-		if err := worker.EnsureEmbedding(embeddingCtx, cfg); err != nil {
-			fmt.Fprintf(os.Stderr, "memoria worker start: embedding: %v\n", err)
+	// embedding worker を並列起動（初回起動時に venv 作成 + モデルロードが必要なため長めのタイムアウト）
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
+		defer cancel()
+		if cfg != nil {
+			if err := worker.EnsureEmbedding(ctx, cfg); err != nil {
+				fmt.Fprintf(os.Stderr, "memoria worker start: embedding: %v\n", err)
+			}
 		}
-	}
+	}()
+
+	wg.Wait()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
