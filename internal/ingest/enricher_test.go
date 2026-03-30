@@ -2,6 +2,7 @@ package ingest_test
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/youyo/memoria/internal/ingest"
@@ -205,4 +206,47 @@ func isValidSummary(summary, original string) bool {
 		return false
 	}
 	return true
+}
+
+// --- summary ノイズ除去テスト ---
+
+func TestEnrichSummaryStripsXMLTags(t *testing.T) {
+	content := "User: <task-notification>\n<task-id>abc123</task-id>\n</task-notification>\n\n実際の内容がここにある"
+	result := ingest.Enrich(content)
+	if strings.Contains(result.Summary, "<task-notification>") {
+		t.Errorf("summary should not contain XML tags, got: %q", result.Summary)
+	}
+	if strings.Contains(result.Summary, "task-id") {
+		t.Errorf("summary should not contain XML tag content, got: %q", result.Summary)
+	}
+	if !strings.Contains(result.Summary, "実際の内容がここにある") {
+		t.Errorf("summary should contain meaningful content, got: %q", result.Summary)
+	}
+}
+
+func TestEnrichSummaryStripsUserPrefix(t *testing.T) {
+	content := "User: これは重要な決定です"
+	result := ingest.Enrich(content)
+	if strings.HasPrefix(result.Summary, "User: ") {
+		t.Errorf("summary should not start with 'User: ', got: %q", result.Summary)
+	}
+	if !strings.Contains(result.Summary, "これは重要な決定です") {
+		t.Errorf("summary should contain the actual content, got: %q", result.Summary)
+	}
+}
+
+func TestEnrichSummaryStripsToolLines(t *testing.T) {
+	content := "User: テスト\n\n[Tool: Bash(command=ls)]\n\nAssistant: 結果です"
+	result := ingest.Enrich(content)
+	if strings.Contains(result.Summary, "[Tool:") {
+		t.Errorf("summary should not contain tool lines, got: %q", result.Summary)
+	}
+}
+
+func TestEnrichSummaryNormalizesWhitespace(t *testing.T) {
+	content := "User: テスト\n\n\n\n結果です"
+	result := ingest.Enrich(content)
+	if strings.Contains(result.Summary, "\n") {
+		t.Errorf("summary should not contain newlines, got: %q", result.Summary)
+	}
 }

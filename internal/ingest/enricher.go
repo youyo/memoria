@@ -2,6 +2,7 @@ package ingest
 
 import (
 	"encoding/json"
+	"regexp"
 	"sort"
 	"strings"
 	"unicode"
@@ -15,6 +16,13 @@ type EnrichedChunk struct {
 	KeywordsJSON string  // JSON 配列文字列 ["kw1", "kw2", ...]
 	Summary      string  // 先頭 100 文字（rune 単位）
 }
+
+// コンパイル済み正規表現（summary クリーニング用）
+var (
+	reXMLTag     = regexp.MustCompile(`<[^>]+>`)
+	reToolLine   = regexp.MustCompile(`(?m)^\[Tool: [^\]]*\]\s*$`)
+	reWhitespace = regexp.MustCompile(`\s+`)
+)
 
 // Enrich はコンテンツに対してヒューリスティック enrichment を行い、EnrichedChunk を返す。
 // LLM 呼び出しは行わず、キーワードマッチと統計的ヒューリスティックで推定する。
@@ -292,11 +300,23 @@ func isASCII(s string) bool {
 	return true
 }
 
-// makeSummary はコンテンツの先頭 100 文字（rune 単位）を summary として返す。
+// makeSummary はコンテンツからノイズを除去し、先頭 100 文字（rune 単位）を summary として返す。
 func makeSummary(content string) string {
-	runes := []rune(content)
+	s := content
+	// XML タグ除去
+	s = reXMLTag.ReplaceAllString(s, "")
+	// プレフィックス除去
+	s = strings.TrimPrefix(s, "User: ")
+	s = strings.TrimPrefix(s, "Assistant: ")
+	s = strings.TrimPrefix(s, "A: ")
+	// Tool 行除去
+	s = reToolLine.ReplaceAllString(s, "")
+	// 空白正規化
+	s = reWhitespace.ReplaceAllString(strings.TrimSpace(s), " ")
+
+	runes := []rune(s)
 	if len(runes) <= 100 {
-		return content
+		return s
 	}
 	return string(runes[:100]) + "..."
 }
