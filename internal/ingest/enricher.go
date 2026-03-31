@@ -29,6 +29,17 @@ var (
 func Enrich(content string) EnrichedChunk {
 	lower := strings.ToLower(content)
 
+	// system metadata は低 importance で保存
+	if isSystemMetadata(lower) {
+		return EnrichedChunk{
+			Kind:         "fact",
+			Importance:   0.1,
+			Scope:        "project",
+			KeywordsJSON: "[]",
+			Summary:      makeSummary(content),
+		}
+	}
+
 	kind := inferKind(lower)
 	importance := inferImportance(lower, kind, content)
 	scope := inferScope(lower, kind)
@@ -58,7 +69,12 @@ var kindPatterns = []struct {
 	{"decision", []string{"decided", "決定", "採用", "chose", "選択", "we will", "にする", "方針", "choose to"}},
 	{"constraint", []string{"must not", "禁止", "してはいけない", "制約", "cannot", "prohibited", "制限", "must never"}},
 	{"todo", []string{"todo", "やること", "残作業", "あとで", "later", "fix later"}},
-	{"failure", []string{"failed", "失敗", "エラー", "error", "バグ", "bug", "crash", "不具合", "exception"}},
+	{"failure", []string{
+		"failed to", "test failed", "build failed",
+		"失敗", "エラーが", "エラー発生",
+		"got error", "error occurred", "error:",
+		"バグ", "bug", "crash", "不具合", "exception",
+	}},
 	{"preference", []string{"prefer", "好み", "したい", "使いたい", "気に入って", "like to"}},
 	{"pattern", []string{"pattern", "パターン", "再利用", "template", "テンプレート", "abstraction"}},
 }
@@ -298,6 +314,13 @@ func isASCII(s string) bool {
 		}
 	}
 	return true
+}
+
+// isSystemMetadata はコンテンツが system metadata（Claude Code の内部タグ）かどうかを判定する。
+func isSystemMetadata(lower string) bool {
+	return strings.Contains(lower, "<task-notification>") ||
+		strings.Contains(lower, "<task-id>") ||
+		strings.Contains(lower, "<system-reminder>")
 }
 
 // makeSummary はコンテンツからノイズを除去し、先頭 100 文字（rune 単位）を summary として返す。

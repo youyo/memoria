@@ -250,3 +250,73 @@ func TestEnrichSummaryNormalizesWhitespace(t *testing.T) {
 		t.Errorf("summary should not contain newlines, got: %q", result.Summary)
 	}
 }
+
+// --- Bug 2: kindPatterns failure 修正テスト ---
+
+// Bug 2: "error handling" が failure にならないこと
+func TestEnrichKindErrorHandlingNotFailure(t *testing.T) {
+	result := ingest.Enrich("We implemented proper error handling in the service")
+	if result.Kind == "failure" {
+		t.Errorf("'error handling' should not be classified as failure, got kind=%s", result.Kind)
+	}
+}
+
+// Bug 2: "error occurred" が failure になること
+func TestEnrichKindErrorOccurredIsFailure(t *testing.T) {
+	result := ingest.Enrich("An error occurred while processing the request")
+	if result.Kind != "failure" {
+		t.Errorf("expected kind=failure for 'error occurred', got %s", result.Kind)
+	}
+}
+
+// Bug 2: "error:" が failure になること
+func TestEnrichKindErrorColonIsFailure(t *testing.T) {
+	result := ingest.Enrich("error: connection refused")
+	if result.Kind != "failure" {
+		t.Errorf("expected kind=failure for 'error:', got %s", result.Kind)
+	}
+}
+
+// Bug 2: "failed to" が failure になること
+func TestEnrichKindFailedToIsFailure(t *testing.T) {
+	result := ingest.Enrich("failed to connect to database")
+	if result.Kind != "failure" {
+		t.Errorf("expected kind=failure for 'failed to', got %s", result.Kind)
+	}
+}
+
+// Bug 2: 通常のセッション終了会話が fact になること
+func TestEnrichNormalSessionEndIsFact(t *testing.T) {
+	result := ingest.Enrich("Thank you, that's all for now. No errors in the implementation.")
+	if result.Kind == "failure" {
+		t.Errorf("normal session end should not be failure, got kind=%s", result.Kind)
+	}
+}
+
+// --- Bug 3: system metadata フィルタテスト ---
+
+// Bug 3: system metadata が低 importance で保存されること
+func TestEnrichSystemMetadataLowImportance(t *testing.T) {
+	content := `<task-notification>
+<task-id>aff04ab02bbd0a8dd</task-id>
+<tool-use-id>toolu_01JxettUQ3p7DKBY5m</tool-use-id>
+</task-notification>`
+	result := ingest.Enrich(content)
+	if result.Importance > 0.15 {
+		t.Errorf("system metadata should have low importance (<= 0.15), got %f", result.Importance)
+	}
+	if result.Kind != "fact" {
+		t.Errorf("system metadata should be kind=fact, got %s", result.Kind)
+	}
+}
+
+// Bug 3: <system-reminder> が低 importance で保存されること
+func TestEnrichSystemReminderLowImportance(t *testing.T) {
+	content := `<system-reminder>
+The following skills are available...
+</system-reminder>`
+	result := ingest.Enrich(content)
+	if result.Importance > 0.15 {
+		t.Errorf("system-reminder should have low importance (<= 0.15), got %f", result.Importance)
+	}
+}

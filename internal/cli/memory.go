@@ -123,49 +123,78 @@ func (c *MemoryGetCmd) Run(globals *Globals, w *io.Writer, lazyDB *LazyDB) error
 	const query = `
 SELECT chunk_id, project_id, content, COALESCE(summary,''), kind, importance, scope, created_at
 FROM chunks
-WHERE chunk_id = ?`
+WHERE chunk_id LIKE ? || '%'`
 
-	var chunk ChunkDetail
-	err = database.SQL().QueryRowContext(ctx, query, c.ID).Scan(
-		&chunk.ChunkID,
-		&chunk.ProjectID,
-		&chunk.Content,
-		&chunk.Summary,
-		&chunk.Kind,
-		&chunk.Importance,
-		&chunk.Scope,
-		&chunk.CreatedAt,
-	)
-	if err == sql.ErrNoRows {
+	rows, err := database.SQL().QueryContext(ctx, query, c.ID)
+	if err != nil {
+		return fmt.Errorf("query chunk: %w", err)
+	}
+	defer rows.Close()
+
+	var chunks []ChunkDetail
+	for rows.Next() {
+		var chunk ChunkDetail
+		if err := rows.Scan(
+			&chunk.ChunkID,
+			&chunk.ProjectID,
+			&chunk.Content,
+			&chunk.Summary,
+			&chunk.Kind,
+			&chunk.Importance,
+			&chunk.Scope,
+			&chunk.CreatedAt,
+		); err != nil {
+			return fmt.Errorf("scan chunk: %w", err)
+		}
+		chunks = append(chunks, chunk)
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("rows error: %w", err)
+	}
+
+	switch len(chunks) {
+	case 0:
 		switch globals.Format {
 		case "json":
-			fmt.Fprintln(*w, `{"error":"not found","chunk_id":"`+c.ID+`"}`)
+			enc := json.NewEncoder(*w)
+			enc.Encode(map[string]string{"error": "not found", "chunk_id": c.ID}) //nolint:errcheck
 		default:
 			fmt.Fprintf(*w, "not found: %s\n", c.ID)
 		}
 		return nil
-	}
-	if err != nil {
-		return fmt.Errorf("query chunk: %w", err)
-	}
-
-	switch globals.Format {
-	case "json":
-		enc := json.NewEncoder(*w)
-		enc.SetIndent("", "  ")
-		return enc.Encode(chunk)
-	default:
-		fmt.Fprintf(*w, "chunk_id:   %s\n", chunk.ChunkID)
-		fmt.Fprintf(*w, "project_id: %s\n", chunk.ProjectID)
-		fmt.Fprintf(*w, "kind:       %s\n", chunk.Kind)
-		fmt.Fprintf(*w, "importance: %.2f\n", chunk.Importance)
-		fmt.Fprintf(*w, "scope:      %s\n", chunk.Scope)
-		fmt.Fprintf(*w, "created_at: %s\n", chunk.CreatedAt)
-		if chunk.Summary != "" {
-			fmt.Fprintf(*w, "summary:    %s\n", chunk.Summary)
+	case 1:
+		chunk := chunks[0]
+		switch globals.Format {
+		case "json":
+			enc := json.NewEncoder(*w)
+			enc.SetIndent("", "  ")
+			return enc.Encode(chunk)
+		default:
+			fmt.Fprintf(*w, "chunk_id:   %s\n", chunk.ChunkID)
+			fmt.Fprintf(*w, "project_id: %s\n", chunk.ProjectID)
+			fmt.Fprintf(*w, "kind:       %s\n", chunk.Kind)
+			fmt.Fprintf(*w, "importance: %.2f\n", chunk.Importance)
+			fmt.Fprintf(*w, "scope:      %s\n", chunk.Scope)
+			fmt.Fprintf(*w, "created_at: %s\n", chunk.CreatedAt)
+			if chunk.Summary != "" {
+				fmt.Fprintf(*w, "summary:    %s\n", chunk.Summary)
+			}
+			fmt.Fprintf(*w, "content:\n%s\n", chunk.Content)
+			return nil
 		}
-		fmt.Fprintf(*w, "content:\n%s\n", chunk.Content)
-		return nil
+	default:
+		msg := fmt.Sprintf("ambiguous ID prefix %q: %d chunks matched", c.ID, len(chunks))
+		switch globals.Format {
+		case "json":
+			enc := json.NewEncoder(*w)
+			return enc.Encode(map[string]string{"error": msg})
+		default:
+			fmt.Fprintln(*w, msg)
+			for _, ch := range chunks {
+				fmt.Fprintf(*w, "  %s\n", ch.ChunkID)
+			}
+			return nil
+		}
 	}
 }
 
