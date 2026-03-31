@@ -1,10 +1,52 @@
 import argparse
+import logging
 import os
 import signal
 import sys
+import time
 
 # python/ ディレクトリを sys.path に追加（uv run python/worker.py 経由での実行対応）
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+# UTC タイムスタンプを使用するよう設定
+logging.Formatter.converter = time.gmtime
+
+# Go 側 ingest worker と同じログフォーマットで統一
+UVICORN_LOG_CONFIG = {
+    "version": 1,
+    "disable_existing_loggers": False,
+    "formatters": {
+        "default": {
+            "()": "uvicorn.logging.DefaultFormatter",
+            "fmt": "%(asctime)s [%(levelname)s] memoria embedding: %(message)s",
+            "datefmt": "%Y-%m-%dT%H:%M:%SZ",
+            "use_colors": False,
+        },
+        "access": {
+            "()": "uvicorn.logging.AccessFormatter",
+            "fmt": "%(asctime)s [%(levelname)s] memoria embedding: %(message)s",
+            "datefmt": "%Y-%m-%dT%H:%M:%SZ",
+            "use_colors": False,
+        },
+    },
+    "handlers": {
+        "default": {
+            "formatter": "default",
+            "class": "logging.StreamHandler",
+            "stream": "ext://sys.stderr",
+        },
+        "access": {
+            "formatter": "access",
+            "class": "logging.StreamHandler",
+            "stream": "ext://sys.stderr",
+        },
+    },
+    "loggers": {
+        "uvicorn": {"handlers": ["default"], "level": "INFO"},
+        "uvicorn.error": {"level": "INFO"},
+        "uvicorn.access": {"handlers": ["access"], "level": "INFO", "propagate": False},
+    },
+}
 
 
 def parse_args(argv=None) -> argparse.Namespace:
@@ -75,7 +117,7 @@ def main() -> None:
     )
 
     try:
-        uvicorn.run(app, uds=args.uds, log_level="info")
+        uvicorn.run(app, uds=args.uds, log_config=UVICORN_LOG_CONFIG)
     finally:
         _cleanup()
 
