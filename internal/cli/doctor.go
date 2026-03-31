@@ -155,6 +155,7 @@ func (c *DoctorCmd) runWithDB(globals *Globals, w *io.Writer, database *db.DB) e
 	if livenessErr != nil {
 		ingestCheck.OK = false
 		ingestCheck.Detail = fmt.Sprintf("check failed: %v", livenessErr)
+		result.OK = false
 	} else {
 		switch liveness {
 		case worker.LivenessAlive:
@@ -167,12 +168,15 @@ func (c *DoctorCmd) runWithDB(globals *Globals, w *io.Writer, database *db.DB) e
 		case worker.LivenessSuspect:
 			ingestCheck.OK = false
 			ingestCheck.Detail = "suspect (heartbeat delayed)"
+			result.OK = false
 		case worker.LivenessStale:
 			ingestCheck.OK = false
 			ingestCheck.Detail = "stale (no recent heartbeat)"
+			result.OK = false
 		case worker.LivenessNotRunning:
 			ingestCheck.OK = false
 			ingestCheck.Detail = "not running"
+			result.OK = false
 		}
 	}
 	result.Checks = append(result.Checks, ingestCheck)
@@ -186,6 +190,7 @@ func (c *DoctorCmd) runWithDB(globals *Globals, w *io.Writer, database *db.DB) e
 	} else {
 		embeddingCheck.OK = false
 		embeddingCheck.Detail = fmt.Sprintf("socket not found: %s", socketPath)
+		result.OK = false
 	}
 	result.Checks = append(result.Checks, embeddingCheck)
 
