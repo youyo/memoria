@@ -191,27 +191,25 @@ func (c *HookUserPromptCmd) RunWithReader(globals *Globals, w io.Writer, reader 
 
 	additionalContext := retrieval.FormatContext(results)
 
-	// UserPrompt の非同期 ingest（hook 応答を block しない）
-	go func() {
-		enqCtx, enqCancel := context.WithTimeout(context.Background(), 2*time.Second)
-		defer enqCancel()
-		payload := UserPromptPayload{
-			SessionID:  input.SessionID,
-			ProjectID:  projectID,
-			Cwd:        input.Cwd,
-			Prompt:     input.Prompt,
-			CapturedAt: time.Now().UTC(),
-		}
-		payloadJSON, err := json.Marshal(payload)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "memoria hook user-prompt: marshal ingest payload: %v\n", err)
-			return
-		}
+	// UserPrompt の ingest enqueue（SQLite INSERT なので同期で十分高速）
+	enqCtx, enqCancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer enqCancel()
+	payload := UserPromptPayload{
+		SessionID:  input.SessionID,
+		ProjectID:  projectID,
+		Cwd:        input.Cwd,
+		Prompt:     input.Prompt,
+		CapturedAt: time.Now().UTC(),
+	}
+	payloadJSON, err := json.Marshal(payload)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "memoria hook user-prompt: marshal ingest payload: %v\n", err)
+	} else {
 		enqQueue := queue.New(sqlDB)
 		if _, err := enqQueue.Enqueue(enqCtx, queue.JobTypeUserPromptIngest, string(payloadJSON)); err != nil {
 			fmt.Fprintf(os.Stderr, "memoria hook user-prompt: enqueue user_prompt_ingest: %v\n", err)
 		}
-	}()
+	}
 
 	return writeHookOutput(w, "UserPromptSubmit", additionalContext)
 }
