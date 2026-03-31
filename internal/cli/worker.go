@@ -17,6 +17,7 @@ import (
 	"github.com/youyo/memoria/internal/embedding"
 	"github.com/youyo/memoria/internal/queue"
 	"github.com/youyo/memoria/internal/worker"
+	"github.com/youyo/memoria/internal/logging"
 )
 
 // WorkerCmd は worker 管理サブコマンドグループを定義する。
@@ -53,7 +54,7 @@ func (c *WorkerStartCmd) Run(globals *Globals, w *io.Writer) error {
 		defer cancel()
 		if cfg != nil {
 			if err := worker.SpawnEmbeddingIfNeeded(ctx, cfg); err != nil {
-				fmt.Fprintf(os.Stderr, "memoria worker start: embedding: %v\n", err)
+				logging.Error("memoria worker start: embedding: %v", err)
 			}
 		}
 	}()
@@ -137,7 +138,7 @@ func (c *WorkerStopCmd) runWithSQL(ctx context.Context, w *io.Writer, sqlDB *sql
 
 	// stop ファイルを作成
 	if err := worker.TouchFile(stopPath); err != nil {
-		fmt.Fprintf(os.Stderr, "memoria worker stop: touch stop file: %v\n", err)
+		logging.Error("memoria worker stop: touch stop file: %v", err)
 		return nil
 	}
 

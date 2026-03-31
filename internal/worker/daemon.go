@@ -11,6 +11,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/youyo/memoria/internal/config"
 	"github.com/youyo/memoria/internal/queue"
+	"github.com/youyo/memoria/internal/logging"
 )
 
 const (
@@ -40,9 +41,7 @@ func NewIngestDaemon(db *sql.DB, q *queue.Queue, runDir, logDir string) *IngestD
 		runDir: runDir,
 		logDir: logDir,
 	}
-	d.logf = func(format string, args ...any) {
-		fmt.Fprintf(os.Stderr, format, args...)
-	}
+	d.logf = logging.NewLogf("INFO")
 	d.processor = NewDefaultJobProcessor(db)
 	return d
 }

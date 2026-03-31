@@ -11,6 +11,7 @@ import (
 
 	"github.com/youyo/memoria/internal/config"
 	"github.com/youyo/memoria/internal/embedding"
+	"github.com/youyo/memoria/internal/logging"
 )
 
 // embeddingHealthPollInterval は /health ポーリングの間隔。
@@ -48,7 +49,7 @@ func ensureEmbeddingWithClient(ctx context.Context, cfg *config.Config, client *
 
 	// 起動していなければ spawn する
 	if err := spawnEmbeddingWorkerFn(cfg); err != nil {
-		fmt.Fprintf(os.Stderr, "memoria: ensureEmbedding: spawn: %v\n", err)
+		logging.Error("memoria: ensureEmbedding: spawn: %v", err)
 		return fmt.Errorf("spawn embedding worker: %w", err)
 	}
 

@@ -3,7 +3,6 @@ package worker
 import (
 	"context"
 	"database/sql"
-	"fmt"
 	"os"
 	"path/filepath"
 	"syscall"
@@ -12,6 +11,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/youyo/memoria/internal/config"
 	"github.com/youyo/memoria/internal/db"
+	"github.com/youyo/memoria/internal/logging"
 )
 
 // probePollInterval は probe 確認のポーリング間隔。
@@ -30,7 +30,7 @@ const minProbeTimeRemaining = 500 * time.Millisecond
 func EnsureIngest(ctx context.Context) {
 	db, err := openDB()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "memoria: ensureIngest: open db: %v\n", err)
+		logging.Error("memoria: ensureIngest: open db: %v", err)
 		return
 	}
 	defer db.Close()
@@ -42,7 +42,7 @@ func EnsureIngest(ctx context.Context) {
 func ensureIngestWithDB(ctx context.Context, db *sql.DB) {
 	liveness, lease, err := CheckLiveness(ctx, db, WorkerNameIngest)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "memoria: ensureIngest: check liveness: %v\n", err)
+		logging.Error("memoria: ensureIngest: check liveness: %v", err)
 		return
 	}
 
@@ -70,7 +70,7 @@ func ensureIngestWithDB(ctx context.Context, db *sql.DB) {
 
 		probeID := uuid.New().String()
 		if err := InsertProbe(ctx, db, probeID, WorkerNameIngest, lease.WorkerID, os.Getpid()); err != nil {
-			fmt.Fprintf(os.Stderr, "memoria: ensureIngest: insert probe: %v\n", err)
+			logging.Error("memoria: ensureIngest: insert probe: %v", err)
 			// probe 失敗 -> stale 扱いで spawn
 			spawnDaemon(ctx)
 			return
@@ -119,16 +119,16 @@ func waitForProbe(ctx context.Context, db *sql.DB, probeID string) bool {
 func spawnDaemon(ctx context.Context) {
 	logPath := filepath.Join(config.LogDir(), "ingest.log")
 	if err := os.MkdirAll(config.LogDir(), 0755); err != nil {
-		fmt.Fprintf(os.Stderr, "memoria: ensureIngest: mkdir log dir: %v\n", err)
+		logging.Error("memoria: ensureIngest: mkdir log dir: %v", err)
 	}
 
 	logFile, err := os.OpenFile(logPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "memoria: ensureIngest: open log file: %v\n", err)
+		logging.Warn("memoria: ensureIngest: open log file: %v", err)
 		// ログファイルが開けない場合は /dev/null にリダイレクト
 		logFile, err = os.Open(os.DevNull)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "memoria: ensureIngest: open /dev/null: %v\n", err)
+			logging.Error("memoria: ensureIngest: open /dev/null: %v", err)
 			return
 		}
 	}
@@ -136,7 +136,7 @@ func spawnDaemon(ctx context.Context) {
 
 	execPath, err := os.Executable()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "memoria: ensureIngest: resolve executable path: %v\n", err)
+		logging.Error("memoria: ensureIngest: resolve executable path: %v", err)
 		return
 	}
 	attr := &os.ProcAttr{
@@ -148,14 +148,14 @@ func spawnDaemon(ctx context.Context) {
 
 	proc, err := os.StartProcess(execPath, []string{execPath, "daemon", "ingest"}, attr)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "memoria: ensureIngest: spawn daemon: %v\n", err)
+		logging.Error("memoria: ensureIngest: spawn daemon: %v", err)
 		return
 	}
 
 	// Wait しない（detached daemon）
 	// proc.Release() でシステムリソースを解放
 	if err := proc.Release(); err != nil {
-		fmt.Fprintf(os.Stderr, "memoria: ensureIngest: release proc: %v\n", err)
+		logging.Warn("memoria: ensureIngest: release proc: %v", err)
 	}
 
 	// spawn 後 300ms 待機して liveness を確認

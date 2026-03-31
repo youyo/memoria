@@ -4,13 +4,13 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
-	"fmt"
 	"io"
 	"os"
 	"time"
 
 	cfg_pkg "github.com/youyo/memoria/internal/config"
 	"github.com/youyo/memoria/internal/embedding"
+	"github.com/youyo/memoria/internal/logging"
 	"github.com/youyo/memoria/internal/project"
 	"github.com/youyo/memoria/internal/queue"
 	"github.com/youyo/memoria/internal/retrieval"
@@ -86,7 +86,7 @@ func (c *HookSessionStartCmd) RunWithReader(globals *Globals, w io.Writer, reade
 
 	var input HookSessionStartInput
 	if err := json.NewDecoder(reader).Decode(&input); err != nil {
-		fmt.Fprintf(os.Stderr, "memoria hook session-start: failed to decode stdin: %v\n", err)
+		logging.Error("memoria hook session-start: failed to decode stdin: %v\n", err)
 		// 失敗時も空の additionalContext を返す
 		return writeHookOutput(w, "SessionStart", "")
 	}
@@ -95,7 +95,7 @@ func (c *HookSessionStartCmd) RunWithReader(globals *Globals, w io.Writer, reade
 	resolver := project.NewResolver(sqlDB)
 	projectID, err := resolver.Resolve(ctx, input.Cwd)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "memoria hook session-start: failed to resolve project: %v\n", err)
+		logging.Error("memoria hook session-start: failed to resolve project: %v\n", err)
 		if projectID == "" {
 			return writeHookOutput(w, "SessionStart", "")
 		}
@@ -115,11 +115,12 @@ func (c *HookSessionStartCmd) RunWithReader(globals *Globals, w io.Writer, reade
 	r := retrieval.New(sqlDB, embedder)
 	results, err := r.SessionStart(ctx, projectID, similarProjects, 4, isolated)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "memoria hook session-start: retrieval error: %v\n", err)
+		logging.Error("memoria hook session-start: retrieval error: %v\n", err)
 		return writeHookOutput(w, "SessionStart", "")
 	}
 
 	additionalContext := retrieval.FormatContext(results)
+	logging.Info("memoria hook session-start: ok\n")
 	return writeHookOutput(w, "SessionStart", additionalContext)
 }
 
@@ -160,7 +161,7 @@ func (c *HookUserPromptCmd) RunWithReader(globals *Globals, w io.Writer, reader 
 
 	var input HookUserPromptInput
 	if err := json.NewDecoder(reader).Decode(&input); err != nil {
-		fmt.Fprintf(os.Stderr, "memoria hook user-prompt: failed to decode stdin: %v\n", err)
+		logging.Error("memoria hook user-prompt: failed to decode stdin: %v\n", err)
 		return writeHookOutput(w, "UserPromptSubmit", "")
 	}
 
@@ -168,7 +169,7 @@ func (c *HookUserPromptCmd) RunWithReader(globals *Globals, w io.Writer, reader 
 	resolver := project.NewResolver(sqlDB)
 	projectID, err := resolver.Resolve(ctx, input.Cwd)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "memoria hook user-prompt: failed to resolve project: %v\n", err)
+		logging.Error("memoria hook user-prompt: failed to resolve project: %v\n", err)
 		if projectID == "" {
 			return writeHookOutput(w, "UserPromptSubmit", "")
 		}
@@ -185,7 +186,7 @@ func (c *HookUserPromptCmd) RunWithReader(globals *Globals, w io.Writer, reader 
 	r := retrieval.New(sqlDB, embedder)
 	results, err := r.UserPrompt(ctx, projectID, similarProjects, input.Prompt, 5, isolated)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "memoria hook user-prompt: retrieval error: %v\n", err)
+		logging.Error("memoria hook user-prompt: retrieval error: %v\n", err)
 		return writeHookOutput(w, "UserPromptSubmit", "")
 	}
 
@@ -203,14 +204,15 @@ func (c *HookUserPromptCmd) RunWithReader(globals *Globals, w io.Writer, reader 
 	}
 	payloadJSON, err := json.Marshal(payload)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "memoria hook user-prompt: marshal ingest payload: %v\n", err)
+		logging.Error("memoria hook user-prompt: marshal ingest payload: %v\n", err)
 	} else {
 		enqQueue := queue.New(sqlDB)
 		if _, err := enqQueue.Enqueue(enqCtx, queue.JobTypeUserPromptIngest, string(payloadJSON)); err != nil {
-			fmt.Fprintf(os.Stderr, "memoria hook user-prompt: enqueue user_prompt_ingest: %v\n", err)
+			logging.Error("memoria hook user-prompt: enqueue user_prompt_ingest: %v\n", err)
 		}
 	}
 
+	logging.Info("memoria hook user-prompt: ok\n")
 	return writeHookOutput(w, "UserPromptSubmit", additionalContext)
 }
 
@@ -271,7 +273,7 @@ func (c *HookStopCmd) RunWithReader(globals *Globals, w *io.Writer, reader io.Re
 	// 1. stdin デコード
 	var input HookStopInput
 	if err := json.NewDecoder(reader).Decode(&input); err != nil {
-		fmt.Fprintf(os.Stderr, "memoria hook stop: failed to decode stdin: %v\n", err)
+		logging.Error("memoria hook stop: failed to decode stdin: %v\n", err)
 		return nil // exit 0
 	}
 
@@ -279,7 +281,7 @@ func (c *HookStopCmd) RunWithReader(globals *Globals, w *io.Writer, reader io.Re
 	resolver := project.NewResolver(sqlDB)
 	projectID, err := resolver.Resolve(ctx, input.Cwd)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "memoria hook stop: failed to resolve project: %v\n", err)
+		logging.Error("memoria hook stop: failed to resolve project: %v\n", err)
 		// best effort: project_id は部分的に取得できている可能性があるので継続
 		if projectID == "" {
 			return nil // exit 0
@@ -296,18 +298,19 @@ func (c *HookStopCmd) RunWithReader(globals *Globals, w *io.Writer, reader io.Re
 	}
 	payloadJSON, err := json.Marshal(payload)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "memoria hook stop: failed to marshal payload: %v\n", err)
+		logging.Error("memoria hook stop: failed to marshal payload: %v\n", err)
 		return nil // exit 0
 	}
 
 	if _, err := q.Enqueue(ctx, queue.JobTypeCheckpointIngest, string(payloadJSON)); err != nil {
-		fmt.Fprintf(os.Stderr, "memoria hook stop: failed to enqueue: %v\n", err)
+		logging.Error("memoria hook stop: failed to enqueue: %v\n", err)
 		return nil // exit 0
 	}
 
 	// 4. ensureWorker（M07 まではスタブ）
 	worker.EnsureIngest(ctx)
 
+	logging.Info("memoria hook stop: ok\n")
 	return nil
 }
 
@@ -350,7 +353,7 @@ func (c *HookSessionEndCmd) RunWithReader(globals *Globals, w *io.Writer, reader
 	// 1. stdin デコード
 	var input HookSessionEndInput
 	if err := json.NewDecoder(reader).Decode(&input); err != nil {
-		fmt.Fprintf(os.Stderr, "memoria hook session-end: failed to decode stdin: %v\n", err)
+		logging.Error("memoria hook session-end: failed to decode stdin: %v\n", err)
 		return nil // exit 0
 	}
 
@@ -358,7 +361,7 @@ func (c *HookSessionEndCmd) RunWithReader(globals *Globals, w *io.Writer, reader
 	resolver := project.NewResolver(sqlDB)
 	projectID, err := resolver.Resolve(ctx, input.Cwd)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "memoria hook session-end: failed to resolve project: %v\n", err)
+		logging.Error("memoria hook session-end: failed to resolve project: %v\n", err)
 		// best effort: project_id は部分的に取得できている可能性があるので継続
 		if projectID == "" {
 			return nil // exit 0
@@ -377,17 +380,18 @@ func (c *HookSessionEndCmd) RunWithReader(globals *Globals, w *io.Writer, reader
 	}
 	payloadJSON, err := json.Marshal(payload)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "memoria hook session-end: failed to marshal payload: %v\n", err)
+		logging.Error("memoria hook session-end: failed to marshal payload: %v\n", err)
 		return nil // exit 0
 	}
 
 	if _, err := q.Enqueue(ctx, queue.JobTypeSessionEndIngest, string(payloadJSON)); err != nil {
-		fmt.Fprintf(os.Stderr, "memoria hook session-end: failed to enqueue: %v\n", err)
+		logging.Error("memoria hook session-end: failed to enqueue: %v\n", err)
 		return nil // exit 0
 	}
 
 	// 4. ensureWorker（M07 まではスタブ）
 	worker.EnsureIngest(ctx)
 
+	logging.Info("memoria hook session-end: ok\n")
 	return nil
 }

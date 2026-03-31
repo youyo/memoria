@@ -2,14 +2,13 @@ package cli
 
 import (
 	"context"
-	"fmt"
 	"io"
-	"os"
 
 	"github.com/youyo/memoria/internal/config"
 	"github.com/youyo/memoria/internal/db"
 	"github.com/youyo/memoria/internal/queue"
 	"github.com/youyo/memoria/internal/worker"
+	"github.com/youyo/memoria/internal/logging"
 )
 
 // DaemonCmd は daemon サブコマンドグループを定義する（内部コマンド）。
@@ -26,7 +25,7 @@ func (c *DaemonIngestCmd) Run(globals *Globals, cfg *config.Config, w *io.Writer
 	dbPath := config.DBFile()
 	database, err := db.Open(dbPath)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "memoria daemon ingest: open db: %v\n", err)
+		logging.Error("memoria daemon ingest: open db: %v", err)
 		return err
 	}
 	defer database.Close()

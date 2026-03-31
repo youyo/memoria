@@ -1,70 +1,92 @@
-# fix: user_prompt_ingest 投入不能 + doctor 誤報の修正
+# feat: ログにタイムスタンプとレベルを追加
 
 ## Context
 
-v0.2.4 で enqueue の goroutine レースは修正したが、**そもそも `user_prompt_ingest` が DB の CHECK 制約に含まれていない**ため enqueue が全件 constraint violation で失敗している。加えて doctor コマンドが ingest_worker の fail を集計結果に反映しておらず「All checks passed」と誤報する。
+現状のログは `fmt.Fprintf(os.Stderr, "memoria hook ...: %v\n", err)` のみで:
+- タイムスタンプなし → 問題発生時刻が特定できない
+- ログレベルなし → エラーと情報の区別がつかない
+- 成功ログなし → 正常動作の確認ができない（「PASS」だけ）
 
-### ログで確認した3つの問題
+今セッションのデバッグでもログのタイムスタンプ不足が障害切り分けを困難にした。
 
-1. **CHECK 制約違反**: `constraint failed: CHECK constraint failed: job_type IN (...)` — `user_prompt_ingest` が許可リストにない
-2. **doctor 誤報**: `[fail] ingest_worker: not running` なのに `All checks passed.` と表示
-3. **ingest worker 停止中**: idle timeout で落ちた後、再起動されていない（これは 1. が直れば自然に解消）
+## 修正方針
 
-## 修正内容
+### 1. `internal/logging/log.go` — 共通ログパッケージ（新規）
 
-### 1. マイグレーション 0005: jobs CHECK 制約に `user_prompt_ingest` を追加
+軽量な構造化ログ関数を提供。外部依存なし（標準 `log` パッケージベース）。
 
-**ファイル**: `internal/db/migrations/0005_user_prompt_job_type.sql`
+```go
+package logging
 
-SQLite は ALTER TABLE で CHECK 制約を変更できないため、テーブル再作成が必要:
+import (
+    "fmt"
+    "io"
+    "os"
+    "time"
+)
 
-```sql
--- jobs テーブルの CHECK 制約に user_prompt_ingest を追加
-CREATE TABLE jobs_new (
-    job_id        TEXT PRIMARY KEY,
-    job_type      TEXT NOT NULL CHECK (job_type IN ('checkpoint_ingest','session_end_ingest','project_refresh','project_similarity_refresh','user_prompt_ingest')),
-    payload_json  TEXT NOT NULL DEFAULT '{}',
-    status        TEXT NOT NULL DEFAULT 'queued' CHECK (status IN ('queued','running','done','failed')),
-    retry_count   INTEGER NOT NULL DEFAULT 0,
-    max_retries   INTEGER NOT NULL DEFAULT 3,
-    run_after     TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
-    started_at    TEXT,
-    finished_at   TEXT,
-    error_message TEXT,
-    created_at    TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
-);
-INSERT INTO jobs_new SELECT * FROM jobs;
-DROP TABLE jobs;
-ALTER TABLE jobs_new RENAME TO jobs;
-CREATE INDEX IF NOT EXISTS idx_jobs_status_run_after ON jobs(status, run_after);
+// Logf は タイムスタンプ + レベル付きでログ出力する。
+// 形式: 2026-03-31T01:06:50Z [ERROR] memoria hook user-prompt: ...
+func Logf(level, format string, args ...any) {
+    ts := time.Now().UTC().Format(time.RFC3339)
+    msg := fmt.Sprintf(format, args...)
+    fmt.Fprintf(os.Stderr, "%s [%s] %s", ts, level, msg)
+}
+
+func Error(format string, args ...any) { Logf("ERROR", format, args...) }
+func Warn(format string, args ...any)  { Logf("WARN", format, args...) }
+func Info(format string, args ...any)   { Logf("INFO", format, args...) }
+func Debug(format string, args ...any)  { Logf("DEBUG", format, args...) }
+
+// NewLogf は logf 関数変数用のファクトリ（daemon.logf 互換）。
+func NewLogf(level string) func(string, ...any) {
+    return func(format string, args ...any) {
+        Logf(level, format, args...)
+    }
+}
 ```
 
-### 2. doctor: ingest_worker / embedding_worker の fail を result.OK に反映
+出力形式: `2026-03-31T01:06:50Z [ERROR] memoria hook user-prompt: failed to decode stdin: EOF`
 
-**ファイル**: `internal/cli/doctor.go`
+### 2. 各ファイルの変更
 
-- L156, 168, 171, 174: ingest_worker の各 fail 分岐に `result.OK = false` を追加
-- L187: embedding_worker の fail 分岐に `result.OK = false` を追加
+| ファイル | 変更箇所数 | 変更内容 |
+|---|---|---|
+| `internal/logging/log.go` | 新規 | 共通ログパッケージ |
+| `internal/cli/hook.go` | 16箇所 | `fmt.Fprintf(os.Stderr, ...)` → `logging.Error(...)` + 成功時に `logging.Info("PASS\n")` |
+| `internal/worker/daemon.go` | logf初期化 | `d.logf = logging.NewLogf("INFO")` |
+| `internal/worker/ensure.go` | 9箇所 | `fmt.Fprintf(os.Stderr, ...)` → `logging.Error/Warn(...)` |
+| `internal/worker/ensure_embedding.go` | 1箇所 | 同上 |
+| `internal/cli/worker.go` | 2箇所 | 同上 |
+| `internal/cli/daemon.go` | 1箇所 | 同上 |
+| `internal/worker/heartbeat.go` | `logToStderr` | `logging.NewLogf("INFO")` で置換 |
 
-### 3. worker 処理ループに `user_prompt_ingest` ハンドラを追加
+### 3. ログレベルの分類
 
-**ファイル**: `internal/worker/daemon.go` の `processJob()` — `user_prompt_ingest` の case を追加
-**ファイル**: `internal/worker/processor.go` — `JobProcessor` に `HandleUserPromptIngest` を追加
+- **ERROR**: enqueue 失敗、DB エラー、decode 失敗など処理失敗
+- **WARN**: 非致命的だが注意が必要（embedding 未起動時のフォールバック等）
+- **INFO**: daemon 起動/停止、ジョブ処理開始/完了、hook 成功（PASS）
 
-※ user_prompt_ingest は現時点では「キューに積む」だけで十分（将来の拡張ポイント）。最小実装として Ack するだけのハンドラで良い。
+### 4. hook の成功ログ追加
+
+現状 hook 成功時は `os.Stdout` に `PASS` のみ出力。stderr にも `logging.Info` で記録する。
 
 ## 対象ファイル一覧
 
-| ファイル | 変更内容 |
+| ファイル | 操作 |
 |---|---|
-| `internal/db/migrations/0005_user_prompt_job_type.sql` | 新規: CHECK 制約追加マイグレーション |
-| `internal/cli/doctor.go` | L156,168,171,174,187: `result.OK = false` 追加 |
-| `internal/worker/daemon.go` | `processJob()` に `user_prompt_ingest` case 追加 |
-| `internal/worker/processor.go` | `HandleUserPromptIngest` メソッド追加 |
+| `internal/logging/log.go` | 新規作成 |
+| `internal/logging/log_test.go` | 新規作成（出力形式テスト） |
+| `internal/cli/hook.go` | 既存変更 |
+| `internal/worker/daemon.go` | 既存変更 |
+| `internal/worker/ensure.go` | 既存変更 |
+| `internal/worker/ensure_embedding.go` | 既存変更 |
+| `internal/cli/worker.go` | 既存変更 |
+| `internal/cli/daemon.go` | 既存変更 |
+| `internal/worker/heartbeat.go` | 既存変更 |
 
 ## 検証
 
 1. `make test` — 全テスト green
-2. `memoria doctor` — ingest worker 停止時に `Some checks failed.` と表示されること
-3. `memoria worker start` → user-prompt hook 発火 → ingest.log に constraint エラーが出ないこと
-4. `sqlite3 ~/.local/share/memoria/memoria.db "SELECT sql FROM sqlite_master WHERE name='jobs'"` — CHECK 制約に `user_prompt_ingest` が含まれること
+2. `echo '{"session_id":"test","cwd":"/tmp","prompt":"hello"}' | memoria hook user-prompt 2>&1 | head` — stderr にタイムスタンプ付きログが出ること
+3. `tail -5 ~/.local/state/memoria/logs/ingest.log` — daemon ログにもタイムスタンプが入ること

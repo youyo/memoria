@@ -3,8 +3,9 @@ package worker
 import (
 	"context"
 	"database/sql"
-	"fmt"
 	"time"
+
+	"github.com/youyo/memoria/internal/logging"
 )
 
 // HeartbeatInterval は heartbeat の更新間隔。
@@ -52,7 +53,7 @@ func StartHeartbeat(ctx context.Context, db *sql.DB, workerName, workerID string
 	return cancel
 }
 
-// logToStderr は fmt.Fprintf(os.Stderr, ...) ラッパー。
+// logToStderr は logging.Info ラッパー。
 func logToStderr(format string, args ...any) {
-	fmt.Printf(format, args...)
+	logging.Info(format, args...)
 }
