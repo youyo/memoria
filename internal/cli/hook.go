@@ -145,6 +145,15 @@ type HookUserPromptCmd struct{}
 
 // Run は user-prompt hook を実行する（os.Stdin から読み取る）。
 func (c *HookUserPromptCmd) Run(globals *Globals, w *io.Writer, lazyDB *LazyDB, cfg *cfg_pkg.Config) error {
+	// embedding worker の起動保証（fire-and-forget）
+	go func() {
+		spawnCtx, spawnCancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer spawnCancel()
+		if cfg != nil {
+			worker.SpawnEmbeddingIfNeeded(spawnCtx, cfg) //nolint:errcheck
+		}
+	}()
+
 	database, err := lazyDB.Get()
 	if err != nil {
 		return writeHookOutput(*w, "UserPromptSubmit", "")
